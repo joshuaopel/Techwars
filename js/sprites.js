@@ -35,7 +35,9 @@ function rrect(ctx,x,y,w,h,r){
 function snapDir(a){ return Math.round(a/(Math.PI/4))*(Math.PI/4); }
 
 function _darken(hex, f){
-  const n=parseInt(hex.slice(1),16);
+  let h=hex.slice(1);
+  if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  const n=parseInt(h,16);
   const r=Math.max(0,Math.min(255,((n>>16)&255)*f))|0;
   const g=Math.max(0,Math.min(255,((n>>8)&255)*f))|0;
   const b=Math.max(0,Math.min(255,(n&255)*f))|0;

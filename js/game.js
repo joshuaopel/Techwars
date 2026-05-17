@@ -116,8 +116,10 @@ class Game {
     const {width:mw, height:mh} = mapData;
     this.isoMinX = -(mh-1)*(ISO_W/2) - ISO_W;
     this.isoMaxX =  (mw-1)*(ISO_W/2) + ISO_W;
-    this.isoMinY = 0;
+    this.isoMinY = -ISO_H * Math.max(mw, mh);
     this.isoMaxY =  (mw+mh-2)*(ISO_H/2) + ISO_H*4;
+    this.worldW  = mw * TS;
+    this.worldH  = mh * TS;
 
     this.units      = [];
     this.buildings  = [];
@@ -177,10 +179,13 @@ class Game {
   // ── map init ──────────────────────────────────────────────────────
   initMap(){
     const m = this.map;
-    // spawn buildings
+    this.props = [];
+    // spawn buildings and props
     m.objects.forEach(obj=>{
       if(BUILDING_STATS[obj.type]){
         this.buildings.push(new Building(obj.type, obj.tx, obj.ty, obj.team));
+      } else if(PROP_TYPES.includes(obj.type)){
+        this.props.push({type:obj.type, wx:(obj.tx+.5)*TS, wy:(obj.ty+.5)*TS, depth:0});
       }
     });
     // spawn starting units near command centers
@@ -217,8 +222,9 @@ class Game {
       const r=this.mmCanvas.getBoundingClientRect();
       const mx=(e.clientX-r.left)/this.mmScale*this.ts;
       const my=(e.clientY-r.top) /this.mmScale*this.ts;
-      this.cam.x=mx-this.cv.width*.5;
-      this.cam.y=my-this.cv.height*.5;
+      const {x:ix,y:iy}=worldToIso(mx,my);
+      this.cam.x=ix-this.cv.width*.5;
+      this.cam.y=iy-this.cv.height*.5;
       this.clampCam();
     });
 
@@ -720,13 +726,17 @@ class Game {
     // collect renderable objects with depth key
     const items=[];
     this.buildings.forEach(b=>{
-      if(!b.dead) items.push({depth:(b.tx+b.ty+b.size)*ISO_H/2+0, obj:b, kind:'bld'});
+      if(!b.dead) items.push({depth:(b.tx+b.ty+b.size)*ISO_H/2, obj:b, kind:'bld'});
     });
     this.units.forEach(u=>{
       if(!u.dead||u.deathTimer>0){
         const iso=worldToIso(u.pos.x,u.pos.y);
         items.push({depth:iso.y, obj:u, kind:'unit'});
       }
+    });
+    this.props.forEach(p=>{
+      const iso=worldToIso(p.wx,p.wy);
+      items.push({depth:iso.y, obj:p, kind:'prop'});
     });
     items.sort((a,b)=>a.depth-b.depth);
 
@@ -738,7 +748,10 @@ class Game {
         drawIsoBuilding(ctx, b.type, b.team, b.tx, b.ty);
         if(flash>0){ctx.restore();}
         // building HP bar
-        if(!b.dead) this._drawIsoBar(b.cx,b.cy-(b.size*TS*.35),b.size*ts*.85,b.hp,b.maxHp);
+        if(!b.dead){
+          const {x:bsx,y:bsy}=worldToIso(b.cx,b.cy);
+          this._drawIsoBar(bsx, bsy-b.size*ISO_H, b.size*ISO_W*.8, b.hp, b.maxHp);
+        }
         // selection highlight for selected building
         if(b===this.selectedBuilding){
           const {x:bx,y:by}=tileToIso(b.tx,b.ty);
@@ -767,6 +780,9 @@ class Game {
           const {x:sx,y:sy}=worldToIso(u.pos.x,u.pos.y);
           this._drawIsoBar(sx, sy+ISO_H*.5-ts*.72, ts*.78, u.hp, u.maxHp);
         }
+      } else if(item.kind==='prop'){
+        const p=item.obj;
+        drawIsoProp(ctx, p.type, p.wx, p.wy);
       }
     });
   }

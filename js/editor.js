@@ -170,7 +170,7 @@ class Editor {
     const {width:mw,height:mh}=this.map;
     const cw=this.canvas.width, ch=this.canvas.height;
     this.cam.x=Math.max(-(mh)*(ISO_W/2)-ISO_W, Math.min(this.cam.x, (mw)*(ISO_W/2)+ISO_W-cw));
-    this.cam.y=Math.max(0, Math.min(this.cam.y, (mw+mh)*(ISO_H/2)+ISO_H*3-ch));
+    this.cam.y=Math.max(-ISO_H*Math.max(mw,mh), Math.min(this.cam.y, (mw+mh)*(ISO_H/2)+ISO_H*3-ch));
   }
 
   screenToTileIso(sx, sy){
