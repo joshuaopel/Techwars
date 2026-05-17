@@ -44,6 +44,50 @@ function _darken(hex, f){
   return `rgb(${r},${g},${b})`;
 }
 
+// ─── Heavy tank sprite sheet ──────────────────────────────────────────
+// img/heavy_tank.png: 2048×256 PNG, 8 frames × 256×256.
+// Frame order (left → right): W  NW  N  NE  E  SE  S  SW
+const _HEAVY_FW = 256, _HEAVY_FH = 256;
+const _HEAVY_DW = 110, _HEAVY_DH = 110; // scaled draw size in game
+
+let _heavySS = null, _heavyReady = false;
+const _heavyCache = {};
+
+(function(){
+  const img = new Image();
+  img.onload  = ()=>{ _heavyReady = true; };
+  img.onerror = ()=>{ console.warn('img/heavy_tank.png not found – using procedural fallback'); };
+  img.src = 'img/heavy_tank.png';
+  _heavySS = img;
+})();
+
+// JS angle (0=E, π/4=SE … ±π=W) → sprite frame index
+// Sprite frames: 0=W 1=NW 2=N 3=NE 4=E 5=SE 6=S 7=SW
+function _heavyFrameIdx(angle){
+  const a = ((angle % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+  // dir: 0=E 1=SE 2=S 3=SW 4=W 5=NW 6=N 7=NE (clockwise from E)
+  const dir = Math.round(a / (Math.PI/4)) % 8;
+  return [4, 5, 6, 7, 0, 1, 2, 3][dir];
+}
+
+// Cached offscreen canvas per (frame, team) — built once when first needed.
+function _heavyCachedFrame(frame, team){
+  const key = frame + '_' + team;
+  if(_heavyCache[key]) return _heavyCache[key];
+  const tmp = document.createElement('canvas');
+  tmp.width = _HEAVY_DW; tmp.height = _HEAVY_DH;
+  const tc = tmp.getContext('2d');
+  tc.drawImage(_heavySS, frame * _HEAVY_FW, 0, _HEAVY_FW, _HEAVY_FH, 0, 0, _HEAVY_DW, _HEAVY_DH);
+  // Team 1 (enemy): apply red tint via source-atop so transparent areas stay transparent
+  if(team === 1){
+    tc.globalCompositeOperation = 'source-atop';
+    tc.globalAlpha = 0.42;
+    tc.fillStyle = '#ff2200';
+    tc.fillRect(0, 0, _HEAVY_DW, _HEAVY_DH);
+  }
+  return (_heavyCache[key] = tmp);
+}
+
 // ─── UNIT drawing (top-down canonical, caller applies iso squish) ─────
 // Drawn centered at (0,0) facing east, before any iso transform.
 function drawUnitAt(ctx, type, team, angle, tileSize, flashAlpha=0){
@@ -121,7 +165,7 @@ function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAl
   const LIFT = 11;
   const midY = sy + ISO_H * 0.5;
 
-  // Ground shadow
+  // Ground shadow ellipse
   ctx.save();
   ctx.translate(sx, midY);
   ctx.scale(1, 0.42);
@@ -130,12 +174,36 @@ function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAl
   ctx.beginPath(); ctx.ellipse(0,0,tileSize*0.36,tileSize*0.36,0,0,Math.PI*2); ctx.fill();
   ctx.restore();
 
-  // Sprite with iso squish
+  // Iso-squished unit
   ctx.save();
   ctx.translate(sx, midY - LIFT);
   ctx.scale(1, 0.62);
-  if(alpha!=null) ctx.globalAlpha = alpha;
-  drawUnitAt(ctx, type, team, angle, tileSize, flashAlpha);
+
+  if(type === 'Heavy' && _heavyReady){
+    // ── Sprite-sheet path ──────────────────────────────────────────
+    const frame   = _heavyFrameIdx(angle);
+    const cached  = _heavyCachedFrame(frame, team);
+    const dx = -_HEAVY_DW / 2, dy = -_HEAVY_DH / 2;
+    if(alpha != null) ctx.globalAlpha = alpha;
+    ctx.drawImage(cached, dx, dy);
+    // Hit flash: white overlay clipped to sprite shape via source-atop on a temp canvas
+    if(flashAlpha > 0){
+      const ftmp = document.createElement('canvas');
+      ftmp.width = _HEAVY_DW; ftmp.height = _HEAVY_DH;
+      const fc = ftmp.getContext('2d');
+      fc.drawImage(cached, 0, 0);
+      fc.globalCompositeOperation = 'source-atop';
+      fc.globalAlpha = flashAlpha * 0.8;
+      fc.fillStyle = '#ffffff';
+      fc.fillRect(0, 0, _HEAVY_DW, _HEAVY_DH);
+      ctx.drawImage(ftmp, dx, dy);
+    }
+  } else {
+    // ── Procedural path (all other types, or Heavy before sheet loads) ──
+    if(alpha != null) ctx.globalAlpha = alpha;
+    drawUnitAt(ctx, type, team, angle, tileSize, flashAlpha);
+  }
+
   ctx.restore();
 }
 
