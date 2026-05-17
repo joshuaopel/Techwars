@@ -24,323 +24,355 @@ const BUILDING_STATS = {
 
 const PROP_TYPES = ['Rock','Crystal','Debris'];
 
-// ─── helpers ────────────────────────────────────────────────────────
-function rrect(ctx, x, y, w, h, r){
+// ─── helpers ─────────────────────────────────────────────────────────
+function rrect(ctx,x,y,w,h,r){
   ctx.beginPath();
-  ctx.moveTo(x+r,y);
-  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
   ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
   ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
-  ctx.closePath();
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+function snapDir(a){ return Math.round(a/(Math.PI/4))*(Math.PI/4); }
+
+function _darken(hex, f){
+  const n=parseInt(hex.slice(1),16);
+  const r=Math.max(0,Math.min(255,((n>>16)&255)*f))|0;
+  const g=Math.max(0,Math.min(255,((n>>8)&255)*f))|0;
+  const b=Math.max(0,Math.min(255,(n&255)*f))|0;
+  return `rgb(${r},${g},${b})`;
 }
 
-function snapDir(angle){
-  return Math.round(angle/(Math.PI/4))*(Math.PI/4);
-}
-
-// ─── UNITS ──────────────────────────────────────────────────────────
-// All drawn centered at (0,0) facing right (East), size=TILE_SIZE
-
+// ─── UNIT drawing (top-down canonical, caller applies iso squish) ─────
+// Drawn centered at (0,0) facing east, before any iso transform.
 function drawUnitAt(ctx, type, team, angle, tileSize, flashAlpha=0){
   const c = TEAM_COL[team] || TEAM_COL[0];
   const s = tileSize * (UNIT_STATS[type]?.size ?? 1);
   ctx.save();
   ctx.rotate(snapDir(angle));
-  ({
-    Scout:     drawScout,
-    Tank:      drawTank,
-    Heavy:     drawHeavy,
-    Artillery: drawArtillery,
-  }[type] || drawScout)(ctx, s, c);
-  if(flashAlpha > 0){
-    ctx.globalAlpha = flashAlpha;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.ellipse(0,0,s*.5,s*.4,0,0,Math.PI*2); ctx.fill();
-    ctx.globalAlpha = 1;
+  ({Scout:drawScout,Tank:drawTank,Heavy:drawHeavy,Artillery:drawArtillery}[type]||drawScout)(ctx,s,c);
+  if(flashAlpha>0){
+    ctx.globalAlpha=flashAlpha;ctx.fillStyle='#fff';
+    ctx.beginPath();ctx.ellipse(0,0,s*.5,s*.4,0,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
   }
   ctx.restore();
 }
 
-function drawScout(ctx, s, c){
+function drawScout(ctx,s,c){
   const hw=s*.5;
-  // hover pods
-  ctx.shadowColor=c.glow; ctx.shadowBlur=5;
-  ctx.fillStyle=c.sec;
-  [[ .0,-.42],[0,.42]].forEach(([ex,ey])=>{
-    ctx.beginPath(); ctx.ellipse(ex*s,ey*s,s*.1,s*.2,0,0,Math.PI*2); ctx.fill();
-  });
+  ctx.shadowColor=c.glow; ctx.shadowBlur=5; ctx.fillStyle=c.sec;
+  [[0,-.42],[0,.42]].forEach(([ex,ey])=>{ctx.beginPath();ctx.ellipse(ex*s,ey*s,s*.1,s*.2,0,0,Math.PI*2);ctx.fill();});
   ctx.shadowBlur=0;
-  // body
-  ctx.fillStyle=c.sec;
-  rrect(ctx,-hw*.52,-s*.28,s*.58,s*.56,s*.07); ctx.fill();
-  ctx.fillStyle=c.pri;
-  rrect(ctx,-hw*.4,-s*.18,s*.46,s*.36,s*.05); ctx.fill();
-  // barrel
-  ctx.fillStyle=c.sec;
-  ctx.fillRect(hw*.22,-s*.05,s*.38,s*.1);
-  ctx.fillStyle=c.pri;
-  ctx.fillRect(hw*.48,-s*.04,s*.12,s*.08);
-  // cockpit
+  ctx.fillStyle=c.sec; rrect(ctx,-hw*.52,-s*.28,s*.58,s*.56,s*.07); ctx.fill();
+  ctx.fillStyle=c.pri; rrect(ctx,-hw*.4,-s*.18,s*.46,s*.36,s*.05); ctx.fill();
+  ctx.fillStyle=c.sec; ctx.fillRect(hw*.22,-s*.05,s*.38,s*.1);
+  ctx.fillStyle=c.pri; ctx.fillRect(hw*.48,-s*.04,s*.12,s*.08);
   ctx.fillStyle='#aaeeff'; ctx.globalAlpha=.6;
   ctx.beginPath(); ctx.ellipse(-s*.05,0,s*.12,s*.08,0,0,Math.PI*2); ctx.fill();
   ctx.globalAlpha=1;
 }
-
-function drawTank(ctx, s, c){
+function drawTank(ctx,s,c){
   const hw=s*.5;
-  // treads
   ctx.fillStyle='#222';
-  [[-hw*.45,-hw*.42],[hw*.45-s*.14,-hw*.42]].forEach(([tx,ty])=>{
-    rrect(ctx,tx,ty,s*.14,s*.84,s*.04); ctx.fill();
-  });
+  [[-hw*.45,-hw*.42],[hw*.45-s*.14,-hw*.42]].forEach(([tx,ty])=>{rrect(ctx,tx,ty,s*.14,s*.84,s*.04);ctx.fill();});
   ctx.fillStyle='#333';
-  for(let i=0;i<4;i++){
-    ctx.fillRect(-hw*.45+s*.02,-hw*.4+i*s*.18,s*.1,s*.06);
-    ctx.fillRect( hw*.33+s*.01,-hw*.4+i*s*.18,s*.1,s*.06);
-  }
-  // hull
-  ctx.fillStyle=c.sec;
-  rrect(ctx,-hw*.38,-hw*.36,s*.76,s*.72,s*.06); ctx.fill();
-  ctx.fillStyle=c.pri;
-  rrect(ctx,-hw*.28,-hw*.24,s*.56,s*.48,s*.05); ctx.fill();
-  // turret ring
-  ctx.fillStyle=c.sec;
-  ctx.beginPath(); ctx.arc(0,0,s*.2,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle=c.pri;
-  ctx.beginPath(); ctx.arc(0,0,s*.15,0,Math.PI*2); ctx.fill();
-  // barrel
-  ctx.fillStyle=c.sec;
-  ctx.fillRect(s*.1,-s*.06,s*.42,s*.12);
-  ctx.fillStyle='#111';
-  ctx.fillRect(s*.42,-s*.04,s*.12,s*.08);
-  // highlight
-  ctx.fillStyle='rgba(255,255,255,.12)';
-  rrect(ctx,-hw*.25,-hw*.2,s*.5,.1*s,s*.02); ctx.fill();
+  for(let i=0;i<4;i++){ctx.fillRect(-hw*.45+s*.02,-hw*.4+i*s*.18,s*.1,s*.06);ctx.fillRect(hw*.33+s*.01,-hw*.4+i*s*.18,s*.1,s*.06);}
+  ctx.fillStyle=c.sec; rrect(ctx,-hw*.38,-hw*.36,s*.76,s*.72,s*.06); ctx.fill();
+  ctx.fillStyle=c.pri; rrect(ctx,-hw*.28,-hw*.24,s*.56,s*.48,s*.05); ctx.fill();
+  ctx.fillStyle=c.sec; ctx.beginPath();ctx.arc(0,0,s*.2,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=c.pri; ctx.beginPath();ctx.arc(0,0,s*.15,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=c.sec; ctx.fillRect(s*.1,-s*.06,s*.42,s*.12);
+  ctx.fillStyle='#111'; ctx.fillRect(s*.42,-s*.04,s*.12,s*.08);
+  ctx.fillStyle='rgba(255,255,255,.12)'; rrect(ctx,-hw*.25,-hw*.2,s*.5,.1*s,s*.02); ctx.fill();
 }
-
-function drawHeavy(ctx, s, c){
+function drawHeavy(ctx,s,c){
   const hw=s*.5;
-  // wide tracks
   ctx.fillStyle='#222';
-  [[-hw*.52,-hw*.5],[hw*.38,-hw*.5]].forEach(([tx,ty])=>{
-    rrect(ctx,tx,ty,s*.14,s,s*.04); ctx.fill();
+  [[-hw*.52,-hw*.5],[hw*.38,-hw*.5]].forEach(([tx,ty])=>{rrect(ctx,tx,ty,s*.14,s,s*.04);ctx.fill();});
+  ctx.fillStyle=c.sec; rrect(ctx,-hw*.42,-hw*.44,s*.84,s*.88,s*.08); ctx.fill();
+  ctx.fillStyle=c.pri; rrect(ctx,-hw*.32,-hw*.32,s*.64,s*.64,s*.06); ctx.fill();
+  [-s*.16,s*.16].forEach(oy=>{
+    ctx.fillStyle=c.sec;ctx.beginPath();ctx.arc(0,oy,s*.14,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=c.pri;ctx.beginPath();ctx.arc(0,oy,s*.09,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=c.sec;ctx.fillRect(s*.08,oy-s*.04,s*.46,s*.08);
+    ctx.fillStyle='#111';ctx.fillRect(s*.42,oy-s*.03,s*.14,s*.06);
   });
-  // hull
-  ctx.fillStyle=c.sec;
-  rrect(ctx,-hw*.42,-hw*.44,s*.84,s*.88,s*.08); ctx.fill();
-  ctx.fillStyle=c.pri;
-  rrect(ctx,-hw*.32,-hw*.32,s*.64,s*.64,s*.06); ctx.fill();
-  // twin turrets
-  [-s*.16, s*.16].forEach(oy=>{
-    ctx.fillStyle=c.sec;
-    ctx.beginPath(); ctx.arc(0,oy,s*.14,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle=c.pri;
-    ctx.beginPath(); ctx.arc(0,oy,s*.09,0,Math.PI*2); ctx.fill();
-    // barrel
-    ctx.fillStyle=c.sec;
-    ctx.fillRect(s*.08,oy-s*.04,s*.46,s*.08);
-    ctx.fillStyle='#111';
-    ctx.fillRect(s*.42,oy-s*.03,s*.14,s*.06);
-  });
-  // armor plate
-  ctx.fillStyle='rgba(255,255,255,.1)';
-  rrect(ctx,-hw*.3,-hw*.28,s*.6,s*.12,s*.02); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.1)'; rrect(ctx,-hw*.3,-hw*.28,s*.6,s*.12,s*.02); ctx.fill();
 }
-
-function drawArtillery(ctx, s, c){
+function drawArtillery(ctx,s,c){
   const hw=s*.5;
-  // narrow tracks
   ctx.fillStyle='#222';
-  [[-hw*.42,-hw*.36],[hw*.28,-hw*.36]].forEach(([tx,ty])=>{
-    rrect(ctx,tx,ty,s*.14,s*.72,s*.04); ctx.fill();
-  });
-  // long chassis
-  ctx.fillStyle=c.sec;
-  rrect(ctx,-hw*.35,-hw*.28,s*.7,s*.56,s*.06); ctx.fill();
-  ctx.fillStyle=c.pri;
-  rrect(ctx,-hw*.25,-hw*.18,s*.5,s*.36,s*.05); ctx.fill();
-  // big barrel
-  ctx.fillStyle=c.sec;
-  ctx.fillRect(-s*.05,-s*.07,s*.82,s*.14);
-  ctx.fillStyle='#111';
-  ctx.fillRect(s*.62,-s*.06,s*.2,s*.12);
-  // rear stabilisers
+  [[-hw*.42,-hw*.36],[hw*.28,-hw*.36]].forEach(([tx,ty])=>{rrect(ctx,tx,ty,s*.14,s*.72,s*.04);ctx.fill();});
+  ctx.fillStyle=c.sec; rrect(ctx,-hw*.35,-hw*.28,s*.7,s*.56,s*.06); ctx.fill();
+  ctx.fillStyle=c.pri; rrect(ctx,-hw*.25,-hw*.18,s*.5,s*.36,s*.05); ctx.fill();
+  ctx.fillStyle=c.sec; ctx.fillRect(-s*.05,-s*.07,s*.82,s*.14);
+  ctx.fillStyle='#111'; ctx.fillRect(s*.62,-s*.06,s*.2,s*.12);
   ctx.fillStyle=c.sec;
   [[-s*.04,-s*.34],[-s*.04,s*.26]].forEach(([ox,oy])=>ctx.fillRect(-hw*.32+ox,oy,s*.12,s*.08));
-  // scope
-  ctx.fillStyle=c.pri;
-  ctx.beginPath(); ctx.arc(s*.1,0,s*.07,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=c.pri; ctx.beginPath();ctx.arc(s*.1,0,s*.07,0,Math.PI*2);ctx.fill();
 }
 
-// ─── BUILDINGS ──────────────────────────────────────────────────────
-function drawBuilding(ctx, type, team, px, py, ts){
-  const c = TEAM_COL[team] || TEAM_COL['-1'];
-  const stats = BUILDING_STATS[type];
-  const bsize = (stats?.size||1)*ts;
-  ({
-    CommandCenter: drawCommandCenter,
-    Turret:        drawTurretBuilding,
-    Factory:       drawFactory,
-    Wall:          drawWall,
-  }[type] || drawWall)(ctx, px, py, bsize, ts, c);
+// ─── ISO unit rendering (shadow + squished sprite) ────────────────────
+// Call from game render loop with ctx already in world-iso space.
+function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAlpha, alpha){
+  const {x:sx,y:sy} = worldToIso(worldX, worldY);
+  const LIFT = 11;
+  const midY = sy + ISO_H * 0.5;
+
+  // Ground shadow
+  ctx.save();
+  ctx.translate(sx, midY);
+  ctx.scale(1, 0.42);
+  ctx.globalAlpha = (alpha||1) * 0.32;
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(0,0,tileSize*0.36,tileSize*0.36,0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // Sprite with iso squish
+  ctx.save();
+  ctx.translate(sx, midY - LIFT);
+  ctx.scale(1, 0.62);
+  if(alpha!=null) ctx.globalAlpha = alpha;
+  drawUnitAt(ctx, type, team, angle, tileSize, flashAlpha);
+  ctx.restore();
 }
 
-function drawCommandCenter(ctx, px, py, bs, ts, c){
-  // outer shell
-  ctx.fillStyle=c.sec;
-  rrect(ctx,px+bs*.04,py+bs*.04,bs*.92,bs*.92,ts*.1); ctx.fill();
-  ctx.fillStyle=c.pri;
-  rrect(ctx,px+bs*.1,py+bs*.1,bs*.8,bs*.8,ts*.08); ctx.fill();
-  // inner panel
-  ctx.fillStyle=c.sec;
-  rrect(ctx,px+bs*.2,py+bs*.2,bs*.6,bs*.6,ts*.06); ctx.fill();
-  ctx.fillStyle='#0a1520';
-  rrect(ctx,px+bs*.25,py+bs*.25,bs*.5,bs*.5,ts*.04); ctx.fill();
-  // antenna
-  ctx.fillStyle=c.pri;
-  ctx.fillRect(px+bs*.47,py+bs*.04,bs*.06,bs*.22);
-  ctx.beginPath(); ctx.arc(px+bs*.5,py+bs*.04,bs*.04,0,Math.PI*2);
-  ctx.fillStyle=c.glow; ctx.fill();
-  // glowing core
-  ctx.shadowColor=c.glow; ctx.shadowBlur=12;
-  ctx.fillStyle=c.pri;
-  ctx.beginPath(); ctx.arc(px+bs*.5,py+bs*.5,bs*.12,0,Math.PI*2); ctx.fill();
-  ctx.shadowBlur=0;
-  // grid lines
-  ctx.strokeStyle='rgba(0,170,255,.15)'; ctx.lineWidth=1;
-  for(let i=1;i<3;i++){
-    ctx.beginPath(); ctx.moveTo(px+bs*.1,py+bs*(.1+i*.27)); ctx.lineTo(px+bs*.9,py+bs*(.1+i*.27)); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(px+bs*(.1+i*.27),py+bs*.1); ctx.lineTo(px+bs*(.1+i*.27),py+bs*.9); ctx.stroke();
+// ─── ISO BUILDINGS ─────────────────────────────────────────────────────
+// Draws a 3-faced isometric box: top face + SW wall + SE wall.
+// tx/ty = top-left tile of the building footprint.
+function drawIsoBuilding(ctx, type, team, tx, ty){
+  const c    = TEAM_COL[team] || TEAM_COL['-1'];
+  const size = BUILDING_STATS[type]?.size || 1;
+
+  // N corner of footprint in iso space
+  const {x:nx, y:ny} = tileToIso(tx, ty);
+  const fw = size*(ISO_W/2); // half-width of diamond footprint
+  const fh = size*(ISO_H/2); // half-height of diamond footprint
+  const bldH = size * ISO_H * 1.1; // building height above ground
+
+  const topY = ny - bldH;
+
+  // SW face (left wall)
+  ctx.fillStyle = _darken(c.sec, 0.55);
+  ctx.beginPath();
+  ctx.moveTo(nx-fw,  ny+fh);
+  ctx.lineTo(nx,     ny+size*ISO_H);
+  ctx.lineTo(nx,     topY+size*ISO_H);
+  ctx.lineTo(nx-fw,  topY+fh);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.3)'; ctx.lineWidth=1;
+  ctx.stroke();
+
+  // SE face (right wall)
+  ctx.fillStyle = _darken(c.sec, 0.38);
+  ctx.beginPath();
+  ctx.moveTo(nx,     ny+size*ISO_H);
+  ctx.lineTo(nx+fw,  ny+fh);
+  ctx.lineTo(nx+fw,  topY+fh);
+  ctx.lineTo(nx,     topY+size*ISO_H);
+  ctx.closePath(); ctx.fill();
+  ctx.stroke();
+
+  // Top face (diamond)
+  ctx.fillStyle = c.pri;
+  ctx.beginPath();
+  ctx.moveTo(nx,     topY);
+  ctx.lineTo(nx+fw,  topY+fh);
+  ctx.lineTo(nx,     topY+size*ISO_H);
+  ctx.lineTo(nx-fw,  topY+fh);
+  ctx.closePath(); ctx.fill();
+  ctx.stroke();
+
+  // Glow border on top
+  ctx.shadowColor = c.glow; ctx.shadowBlur = 6;
+  ctx.strokeStyle = c.pri; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(nx,     topY);
+  ctx.lineTo(nx+fw,  topY+fh);
+  ctx.lineTo(nx,     topY+size*ISO_H);
+  ctx.lineTo(nx-fw,  topY+fh);
+  ctx.closePath(); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Building-specific top details
+  _drawBldTopDetails(ctx, type, team, c, nx, topY, fw, fh, size);
+}
+
+function _drawBldTopDetails(ctx, type, team, c, nx, topY, fw, fh, size){
+  const cx2 = nx;
+  const cy2 = topY + fh; // center of top face
+
+  ctx.save();
+  // Project details onto the iso top face
+  // Use the iso transform so detail drawing looks right on the face
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // reset temporarily...
+  // Instead draw directly with iso coordinates
+  ctx.restore();
+
+  switch(type){
+    case 'CommandCenter':
+      // Central glow core
+      ctx.shadowColor=c.glow; ctx.shadowBlur=12;
+      ctx.fillStyle=c.glow;
+      ctx.beginPath(); ctx.ellipse(nx, topY+fh, fw*.18, fh*.28, 0, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur=0;
+      // antenna
+      ctx.strokeStyle=c.pri; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(nx,topY); ctx.lineTo(nx,topY-size*12); ctx.stroke();
+      ctx.fillStyle=c.glow;
+      ctx.beginPath(); ctx.arc(nx,topY-size*12,size*3,0,Math.PI*2); ctx.fill();
+      // four corner dots on face
+      ctx.fillStyle=c.pri;
+      [[fw*.5,fh*.5],[fw*.5,-fh*.5],[-fw*.5,-fh*.5],[-fw*.5,fh*.5]].forEach(([ox,oy])=>{
+        ctx.beginPath(); ctx.arc(nx+ox,topY+fh+oy,size*1.5,0,Math.PI*2); ctx.fill();
+      });
+      break;
+
+    case 'Turret':
+      // Barrel pointing E on the top face
+      ctx.strokeStyle=c.pri; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.moveTo(nx,topY+fh); ctx.lineTo(nx+fw*.8,topY+fh*.6); ctx.stroke();
+      ctx.fillStyle=c.sec;
+      ctx.beginPath(); ctx.ellipse(nx,topY+fh,fw*.22,fh*.35,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=c.pri;
+      ctx.beginPath(); ctx.ellipse(nx,topY+fh,fw*.13,fh*.2,0,0,Math.PI*2); ctx.fill();
+      ctx.shadowColor=c.glow; ctx.shadowBlur=8;
+      ctx.fillStyle=c.glow; ctx.globalAlpha=.5;
+      ctx.beginPath(); ctx.ellipse(nx,topY+fh,fw*.06,fh*.1,0,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha=1; ctx.shadowBlur=0;
+      break;
+
+    case 'Factory':
+      // Two chimney-style pillars
+      [-.3,.3].forEach(ox=>{
+        ctx.fillStyle=c.sec;
+        ctx.beginPath();
+        ctx.ellipse(nx+ox*fw,topY+fh*.6,fw*.1,fh*.15,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle=c.pri;
+        ctx.beginPath();
+        ctx.ellipse(nx+ox*fw,topY+fh*.55,fw*.06,fh*.09,0,0,Math.PI*2); ctx.fill();
+      });
+      // Door slot
+      ctx.fillStyle=_darken(c.sec,0.3);
+      ctx.beginPath(); ctx.ellipse(nx,topY+fh*1.1,fw*.15,fh*.22,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(0,200,255,.35)';
+      ctx.beginPath(); ctx.ellipse(nx,topY+fh*1.1,fw*.1,fh*.15,0,0,Math.PI*2); ctx.fill();
+      break;
+
+    case 'Wall':
+      // Cross pattern
+      ctx.strokeStyle=c.sec; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(nx-fw*.4,topY+fh); ctx.lineTo(nx+fw*.4,topY+fh); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(nx,topY+fh*.3); ctx.lineTo(nx,topY+fh*1.7); ctx.stroke();
+      break;
   }
 }
 
-function drawTurretBuilding(ctx, px, py, bs, ts, c){
-  // base pad
-  ctx.fillStyle='#333';
-  rrect(ctx,px+bs*.08,py+bs*.08,bs*.84,bs*.84,ts*.06); ctx.fill();
-  ctx.fillStyle=c.sec;
-  rrect(ctx,px+bs*.15,py+bs*.15,bs*.7,bs*.7,ts*.05); ctx.fill();
-  // body
-  ctx.fillStyle=c.pri;
-  ctx.beginPath(); ctx.arc(px+bs*.5,py+bs*.5,bs*.28,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle=c.sec;
-  ctx.beginPath(); ctx.arc(px+bs*.5,py+bs*.5,bs*.2,0,Math.PI*2); ctx.fill();
-  // barrel (facing right)
-  ctx.fillStyle=c.pri;
-  ctx.fillRect(px+bs*.5,py+bs*.47,bs*.42,bs*.06);
-  ctx.fillStyle='#111';
-  ctx.fillRect(px+bs*.84,py+bs*.46,bs*.1,bs*.08);
-  // glow
-  ctx.shadowColor=c.glow; ctx.shadowBlur=8;
-  ctx.fillStyle=c.glow; ctx.globalAlpha=.5;
-  ctx.beginPath(); ctx.arc(px+bs*.5,py+bs*.5,bs*.1,0,Math.PI*2); ctx.fill();
-  ctx.globalAlpha=1; ctx.shadowBlur=0;
+// ─── PROPS ───────────────────────────────────────────────────────────
+// For iso rendering: draw prop at iso screen position with slight squish
+function drawIsoProp(ctx, type, worldX, worldY){
+  const {x:sx,y:sy} = worldToIso(worldX, worldY);
+  ctx.save();
+  ctx.translate(sx, sy + ISO_H*0.5 - 4);
+  ctx.scale(1, 0.62);
+  ({Rock:drawRock,Crystal:drawCrystal,Debris:drawDebris}[type]||drawRock)(ctx,0,0,TILE_SIZE);
+  ctx.restore();
 }
 
-function drawFactory(ctx, px, py, bs, ts, c){
-  ctx.fillStyle=c.sec;
-  rrect(ctx,px+bs*.06,py+bs*.06,bs*.88,bs*.88,ts*.06); ctx.fill();
-  ctx.fillStyle='#0a1520';
-  rrect(ctx,px+bs*.12,py+bs*.12,bs*.76,bs*.76,ts*.04); ctx.fill();
-  ctx.fillStyle=c.pri;
-  // chimney stacks
-  [[.25,.1,.1,.35],[.6,.1,.1,.35]].forEach(([ox,oy,w,h])=>ctx.fillRect(px+bs*ox,py+bs*oy,bs*w,bs*h));
-  // door
-  ctx.fillStyle=c.sec;
-  rrect(ctx,px+bs*.35,py+bs*.55,bs*.3,bs*.38,ts*.02); ctx.fill();
-  ctx.fillStyle='rgba(0,200,255,.3)';
-  rrect(ctx,px+bs*.38,py+bs*.58,bs*.24,bs*.32,ts*.01); ctx.fill();
-  // conveyor
-  ctx.fillStyle=c.pri; ctx.globalAlpha=.5;
-  for(let i=0;i<4;i++) ctx.fillRect(px+bs*.14,py+bs*(.38+i*.06),bs*.72,bs*.02);
-  ctx.globalAlpha=1;
-}
-
-function drawWall(ctx, px, py, bs, ts, c){
-  ctx.fillStyle=c.sec;
-  ctx.fillRect(px+bs*.05,py+bs*.05,bs*.9,bs*.9);
-  ctx.fillStyle=c.pri;
-  ctx.fillRect(px+bs*.12,py+bs*.12,bs*.76,bs*.76);
-  ctx.strokeStyle=c.sec; ctx.lineWidth=1;
-  [[.5,.05,.5,.45],[.05,.5,.45,.5],[.55,.5,.95,.5],[.5,.55,.5,.95]].forEach(([x1,y1,x2,y2])=>{
-    ctx.beginPath(); ctx.moveTo(px+bs*x1,py+bs*y1); ctx.lineTo(px+bs*x2,py+bs*y2); ctx.stroke();
-  });
-}
-
-// ─── PROPS ──────────────────────────────────────────────────────────
-function drawProp(ctx, type, px, py, ts){
-  ({
-    Rock:    drawRock,
-    Crystal: drawCrystal,
-    Debris:  drawDebris,
-  }[type] || drawRock)(ctx, px, py, ts);
-}
-
-function drawRock(ctx, px, py, ts){
+function drawRock(ctx,px,py,ts){
   ctx.fillStyle='#5a5a5a';
   ctx.beginPath();
-  ctx.moveTo(px+ts*.5,py+ts*.15); ctx.lineTo(px+ts*.8,py+ts*.4); ctx.lineTo(px+ts*.75,py+ts*.8);
-  ctx.lineTo(px+ts*.25,py+ts*.8); ctx.lineTo(px+ts*.18,py+ts*.4); ctx.closePath(); ctx.fill();
+  ctx.moveTo(px+ts*.5,py+ts*.15);ctx.lineTo(px+ts*.8,py+ts*.4);ctx.lineTo(px+ts*.75,py+ts*.8);
+  ctx.lineTo(px+ts*.25,py+ts*.8);ctx.lineTo(px+ts*.18,py+ts*.4);ctx.closePath();ctx.fill();
   ctx.fillStyle='#777';
-  ctx.beginPath(); ctx.moveTo(px+ts*.5,py+ts*.15); ctx.lineTo(px+ts*.6,py+ts*.38); ctx.lineTo(px+ts*.4,py+ts*.38); ctx.closePath(); ctx.fill();
+  ctx.beginPath();ctx.moveTo(px+ts*.5,py+ts*.15);ctx.lineTo(px+ts*.6,py+ts*.38);ctx.lineTo(px+ts*.4,py+ts*.38);ctx.closePath();ctx.fill();
 }
-
-function drawCrystal(ctx, px, py, ts){
+function drawCrystal(ctx,px,py,ts){
   [[ts*.5,ts*.18,ts*.58,ts*.7,ts*.42,ts*.7,'#00ddff'],
    [ts*.3,ts*.25,ts*.38,ts*.75,ts*.22,ts*.75,'#00aacc'],
    [ts*.68,ts*.28,ts*.76,ts*.72,ts*.6,ts*.72,'#0088aa']].forEach(([x1,y1,xr,yr,xl,yl,col])=>{
-    ctx.fillStyle=col; ctx.globalAlpha=.75;
-    ctx.beginPath(); ctx.moveTo(px+x1,py+y1); ctx.lineTo(px+xr,py+yr); ctx.lineTo(px+xl,py+yl); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=col;ctx.globalAlpha=.75;
+    ctx.beginPath();ctx.moveTo(px+x1,py+y1);ctx.lineTo(px+xr,py+yr);ctx.lineTo(px+xl,py+yl);ctx.closePath();ctx.fill();
   });
   ctx.globalAlpha=1;
-  ctx.shadowColor='#00ffff'; ctx.shadowBlur=8;
+  ctx.shadowColor='#00ffff';ctx.shadowBlur=8;
   ctx.fillStyle='#aaffff';
-  ctx.beginPath(); ctx.arc(px+ts*.5,py+ts*.32,ts*.04,0,Math.PI*2); ctx.fill();
+  ctx.beginPath();ctx.arc(px+ts*.5,py+ts*.32,ts*.04,0,Math.PI*2);ctx.fill();
   ctx.shadowBlur=0;
 }
-
-function drawDebris(ctx, px, py, ts){
-  ctx.fillStyle='#444'; ctx.strokeStyle='#666'; ctx.lineWidth=1;
-  ctx.save(); ctx.translate(px+ts*.5,py+ts*.5); ctx.rotate(.4);
-  ctx.fillRect(-ts*.38,-ts*.12,ts*.76,ts*.24); ctx.strokeRect(-ts*.38,-ts*.12,ts*.76,ts*.24);
-  ctx.fillRect(-ts*.1,-ts*.35,ts*.2,ts*.7); ctx.strokeRect(-ts*.1,-ts*.35,ts*.2,ts*.7);
+function drawDebris(ctx,px,py,ts){
+  ctx.fillStyle='#444';ctx.strokeStyle='#666';ctx.lineWidth=1;
+  ctx.save();ctx.translate(px+ts*.5,py+ts*.5);ctx.rotate(.4);
+  ctx.fillRect(-ts*.38,-ts*.12,ts*.76,ts*.24);ctx.strokeRect(-ts*.38,-ts*.12,ts*.76,ts*.24);
+  ctx.fillRect(-ts*.1,-ts*.35,ts*.2,ts*.7);ctx.strokeRect(-ts*.1,-ts*.35,ts*.2,ts*.7);
   ctx.restore();
 }
 
-// ─── PROJECTILES ────────────────────────────────────────────────────
-const PROJ_COL = {
-  bullet:  '#ffee00',
-  shell:   '#ff9900',
-  missile: '#00ffaa',
-  beam:    '#ff4444',
-};
+// ─── Flat building (palette previews) ─────────────────────────────────
+function drawBuilding(ctx, type, team, px, py, ts){
+  const c = TEAM_COL[team] || TEAM_COL['-1'];
+  const size = BUILDING_STATS[type]?.size||1;
+  const bs = size*ts;
+  ({CommandCenter:drawCommandCenter,Turret:drawTurretBuilding,Factory:drawFactory,Wall:drawWall}
+    [type]||drawWall)(ctx,px,py,bs,ts,c);
+}
+function drawCommandCenter(ctx,px,py,bs,ts,c){
+  ctx.fillStyle=c.sec; _rrect(ctx,px+bs*.04,py+bs*.04,bs*.92,bs*.92,ts*.1); ctx.fill();
+  ctx.fillStyle=c.pri; _rrect(ctx,px+bs*.1,py+bs*.1,bs*.8,bs*.8,ts*.08); ctx.fill();
+  ctx.fillStyle=c.sec; _rrect(ctx,px+bs*.2,py+bs*.2,bs*.6,bs*.6,ts*.06); ctx.fill();
+  ctx.fillStyle='#0a1520'; _rrect(ctx,px+bs*.25,py+bs*.25,bs*.5,bs*.5,ts*.04); ctx.fill();
+  ctx.fillStyle=c.pri; ctx.fillRect(px+bs*.47,py+bs*.04,bs*.06,bs*.22);
+  ctx.shadowColor=c.glow;ctx.shadowBlur=12;
+  ctx.fillStyle=c.pri;ctx.beginPath();ctx.arc(px+bs*.5,py+bs*.5,bs*.12,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+}
+function _rrect(ctx,x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+function drawTurretBuilding(ctx,px,py,bs,ts,c){
+  ctx.fillStyle='#333';_rrect(ctx,px+bs*.08,py+bs*.08,bs*.84,bs*.84,ts*.06);ctx.fill();
+  ctx.fillStyle=c.sec;_rrect(ctx,px+bs*.15,py+bs*.15,bs*.7,bs*.7,ts*.05);ctx.fill();
+  ctx.fillStyle=c.pri;ctx.beginPath();ctx.arc(px+bs*.5,py+bs*.5,bs*.28,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=c.sec;ctx.beginPath();ctx.arc(px+bs*.5,py+bs*.5,bs*.2,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=c.pri;ctx.fillRect(px+bs*.5,py+bs*.47,bs*.42,bs*.06);
+}
+function drawFactory(ctx,px,py,bs,ts,c){
+  ctx.fillStyle=c.sec;_rrect(ctx,px+bs*.06,py+bs*.06,bs*.88,bs*.88,ts*.06);ctx.fill();
+  ctx.fillStyle='#0a1520';_rrect(ctx,px+bs*.12,py+bs*.12,bs*.76,bs*.76,ts*.04);ctx.fill();
+  ctx.fillStyle=c.pri;
+  [[.25,.1,.1,.35],[.6,.1,.1,.35]].forEach(([ox,oy,w,h])=>ctx.fillRect(px+bs*ox,py+bs*oy,bs*w,bs*h));
+}
+function drawWall(ctx,px,py,bs,ts,c){
+  ctx.fillStyle=c.sec;ctx.fillRect(px+bs*.05,py+bs*.05,bs*.9,bs*.9);
+  ctx.fillStyle=c.pri;ctx.fillRect(px+bs*.12,py+bs*.12,bs*.76,bs*.76);
+}
 
+// ─── Projectile drawing ────────────────────────────────────────────────
+const PROJ_COL={bullet:'#ffee00',shell:'#ff9900',missile:'#00ffaa',beam:'#ff4444'};
 function drawProjectile(ctx, proj){
-  const col = PROJ_COL[proj.kind] || '#fff';
+  // Convert world pos to iso
+  const {x:sx,y:sy}=worldToIso(proj.x,proj.y);
+  const col=PROJ_COL[proj.kind]||'#fff';
   ctx.save();
-  ctx.translate(proj.x, proj.y);
+  ctx.translate(sx,sy+ISO_H*.5);
+  // Flatten angle to look right on iso plane
+  ctx.scale(1,0.5);
   ctx.rotate(proj.angle);
-  ctx.shadowColor=col; ctx.shadowBlur=6;
-  ctx.fillStyle=col;
-  if(proj.kind==='beam'){
-    ctx.fillRect(-10,-2,20,4);
-  } else if(proj.kind==='missile'){
-    ctx.fillRect(-6,-2,12,4);
-    ctx.fillStyle='#fff'; ctx.fillRect(5,-1,3,2);
-  } else {
-    ctx.beginPath(); ctx.arc(0,0,proj.kind==='shell'?4:3,0,Math.PI*2); ctx.fill();
-  }
+  ctx.shadowColor=col;ctx.shadowBlur=6;ctx.fillStyle=col;
+  if(proj.kind==='beam'){ ctx.fillRect(-10,-2,20,4); }
+  else if(proj.kind==='missile'){ ctx.fillRect(-6,-2,12,4);ctx.fillStyle='#fff';ctx.fillRect(5,-1,3,2); }
+  else { ctx.beginPath();ctx.arc(0,0,proj.kind==='shell'?4:3,0,Math.PI*2);ctx.fill(); }
   ctx.shadowBlur=0;
   ctx.restore();
 }
 
-// ─── PORTRAIT (for HUD) ─────────────────────────────────────────────
+// ─── Portrait (flat HUD canvas) ────────────────────────────────────────
 function drawPortrait(ctx, type, team, w, h){
   ctx.fillStyle='#0a1520'; ctx.fillRect(0,0,w,h);
-  ctx.save();
-  ctx.translate(w*.5,h*.5);
-  const ts = Math.min(w,h)*.7;
-  drawUnitAt(ctx, type, team, 0, ts/( UNIT_STATS[type]?.size||1 ));
+  ctx.save(); ctx.translate(w*.5,h*.5);
+  drawUnitAt(ctx, type, team, 0, Math.min(w,h)*.65);
   ctx.restore();
 }

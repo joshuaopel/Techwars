@@ -110,10 +110,14 @@ class Game {
     this.map = mapData;
     this.ts  = TS;
 
-    // camera
+    // camera in iso screen space
     this.cam = { x:0, y:0 };
-    this.worldW = mapData.width  * TS;
-    this.worldH = mapData.height * TS;
+    // iso world bounds for camera clamping
+    const {width:mw, height:mh} = mapData;
+    this.isoMinX = -(mh-1)*(ISO_W/2) - ISO_W;
+    this.isoMaxX =  (mw-1)*(ISO_W/2) + ISO_W;
+    this.isoMinY = 0;
+    this.isoMaxY =  (mw+mh-2)*(ISO_H/2) + ISO_H*4;
 
     this.units      = [];
     this.buildings  = [];
@@ -143,9 +147,13 @@ class Game {
     this.resize();
     window.addEventListener('resize',()=>this.resize());
 
-    // center camera on player base
+    // center camera on player base (iso)
     const pBase = this.buildings.find(b=>b.team===0&&b.type==='CommandCenter');
-    if(pBase){ this.cam.x=pBase.cx-this.cv.width*.5; this.cam.y=pBase.cy-this.cv.height*.5; }
+    if(pBase){
+      const ip = worldToIso(pBase.cx, pBase.cy);
+      this.cam.x = ip.x - this.cv.width*.5;
+      this.cam.y = ip.y - this.cv.height*.5;
+    }
     this.clampCam();
 
     requestAnimationFrame(t=>this.loop(t));
@@ -162,8 +170,8 @@ class Game {
 
   clampCam(){
     const cw=this.cv.width, ch=this.cv.height;
-    this.cam.x = Math.max(0, Math.min(this.cam.x, Math.max(0,this.worldW-cw)));
-    this.cam.y = Math.max(0, Math.min(this.cam.y, Math.max(0,this.worldH-ch)));
+    this.cam.x = Math.max(this.isoMinX, Math.min(this.cam.x, this.isoMaxX - cw));
+    this.cam.y = Math.max(this.isoMinY, Math.min(this.cam.y, this.isoMaxY - ch));
   }
 
   // ── map init ──────────────────────────────────────────────────────
@@ -218,8 +226,33 @@ class Game {
     document.getElementById('btn-editor')?.addEventListener('click',()=>window.location.href='editor.html');
   }
 
-  screenToWorld(sx,sy){ return new V2(sx+this.cam.x, sy+this.cam.y); }
-  worldToScreen(wx,wy){ return new V2(wx-this.cam.x, wy-this.cam.y); }
+  screenToWorld(sx,sy){
+    const w = isoToWorld(sx+this.cam.x, sy+this.cam.y);
+    return new V2(w.x, w.y);
+  }
+  worldToScreen(wx,wy){
+    const i = worldToIso(wx,wy);
+    return new V2(i.x-this.cam.x, i.y-this.cam.y);
+  }
+  // Visible tile range for viewport culling
+  getVisibleTileRange(){
+    const {cam,cv,map} = this;
+    const hw=ISO_W/2, hh=ISO_H/2;
+    const corners=[
+      {ix:cam.x,          iy:cam.y},
+      {ix:cam.x+cv.width, iy:cam.y},
+      {ix:cam.x,          iy:cam.y+cv.height},
+      {ix:cam.x+cv.width, iy:cam.y+cv.height},
+    ];
+    const ftxs=corners.map(c=>(c.ix/hw+c.iy/hh)/2);
+    const ftys=corners.map(c=>(c.iy/hh-c.ix/hw)/2);
+    return {
+      minTx:Math.max(0,            Math.floor(Math.min(...ftxs))-2),
+      maxTx:Math.min(map.width-1,  Math.ceil( Math.max(...ftxs))+2),
+      minTy:Math.max(0,            Math.floor(Math.min(...ftys))-2),
+      maxTy:Math.min(map.height-1, Math.ceil( Math.max(...ftys))+2),
+    };
+  }
 
   unitAt(wx, wy){
     for(let i=this.units.length-1;i>=0;i--){
@@ -652,75 +685,100 @@ class Game {
     ctx.fillStyle='#020810'; ctx.fillRect(0,0,cv.width,cv.height);
 
     ctx.save();
-    ctx.translate(-cam.x,-cam.y);
+    ctx.translate(-cam.x, -cam.y);  // single iso-space camera translate
 
     this.renderTerrain();
-    this.renderBuildings();
-    this.renderSelectionCircles();
-    this.renderUnits();
+    this.renderDepthSorted();   // buildings, props, units, health bars all depth-sorted
     this.renderProjectiles();
     this.renderParticles();
-    this.renderHealthBars();
     this.renderRallyPoint();
-    this.renderDragBox();
 
     ctx.restore();
 
+    this.renderDragBox();       // screen-space only
     this.renderHUD();
   }
 
   renderTerrain(){
-    const {ctx,map,ts,cam,cv} = this;
-    const x0=Math.max(0,Math.floor(cam.x/ts));
-    const y0=Math.max(0,Math.floor(cam.y/ts));
-    const x1=Math.min(map.width, Math.ceil((cam.x+cv.width)/ts));
-    const y1=Math.min(map.height,Math.ceil((cam.y+cv.height)/ts));
-    for(let ty=y0;ty<y1;ty++) for(let tx=x0;tx<x1;tx++){
-      drawTile(ctx, map.terrain[ty*map.width+tx], tx*ts, ty*ts, ts);
+    const {ctx, map} = this;
+    const {minTx,maxTx,minTy,maxTy} = this.getVisibleTileRange();
+    // Paint in diagonal stripes (front-to-back = ascending tx+ty)
+    for(let sum=minTx+minTy; sum<=maxTx+maxTy; sum++){
+      const txa=Math.max(minTx, sum-maxTy);
+      const txb=Math.min(maxTx, sum-minTy);
+      for(let tx=txa; tx<=txb; tx++){
+        const ty=sum-tx;
+        if(ty<minTy||ty>maxTy) continue;
+        drawIsoTile(ctx, map.terrain[ty*map.width+tx], tx, ty);
+      }
     }
   }
 
-  renderBuildings(){
+  // Render all objects (buildings, units) sorted by depth (iso y = tx+ty)
+  renderDepthSorted(){
+    const {ctx, ts} = this;
+    // collect renderable objects with depth key
+    const items=[];
     this.buildings.forEach(b=>{
-      if(b.dead) return;
-      const flash = b.flashTimer>0 ? b.flashTimer/0.12 : 0;
-      this.ctx.save();
-      if(flash>0){
-        this.ctx.globalAlpha=.7+.3*flash;
-      }
-      drawBuilding(this.ctx, b.type, b.team, b.px, b.py, this.ts);
-      if(flash>0){
-        this.ctx.globalAlpha=flash*.6;
-        this.ctx.fillStyle='#fff';
-        this.ctx.fillRect(b.px,b.py,b.size*this.ts,b.size*this.ts);
-        this.ctx.globalAlpha=1;
-      }
-      this.ctx.restore();
+      if(!b.dead) items.push({depth:(b.tx+b.ty+b.size)*ISO_H/2+0, obj:b, kind:'bld'});
     });
-  }
-
-  renderSelectionCircles(){
-    const {ctx,ts} = this;
     this.units.forEach(u=>{
-      if(u.dead||!u.selected) return;
-      ctx.strokeStyle='rgba(0,220,255,.85)';
-      ctx.lineWidth=1.5;
-      ctx.beginPath(); ctx.ellipse(u.pos.x, u.pos.y, ts*.42, ts*.22, 0, 0, Math.PI*2); ctx.stroke();
+      if(!u.dead||u.deathTimer>0){
+        const iso=worldToIso(u.pos.x,u.pos.y);
+        items.push({depth:iso.y, obj:u, kind:'unit'});
+      }
+    });
+    items.sort((a,b)=>a.depth-b.depth);
+
+    items.forEach(item=>{
+      if(item.kind==='bld'){
+        const b=item.obj;
+        const flash=b.flashTimer>0?b.flashTimer/0.12:0;
+        if(flash>0){ctx.save();ctx.globalAlpha=0.75+0.25*flash;}
+        drawIsoBuilding(ctx, b.type, b.team, b.tx, b.ty);
+        if(flash>0){ctx.restore();}
+        // building HP bar
+        if(!b.dead) this._drawIsoBar(b.cx,b.cy-(b.size*TS*.35),b.size*ts*.85,b.hp,b.maxHp);
+        // selection highlight for selected building
+        if(b===this.selectedBuilding){
+          const {x:bx,y:by}=tileToIso(b.tx,b.ty);
+          const fw=b.size*(ISO_W/2), fh=b.size*(ISO_H/2);
+          ctx.strokeStyle='rgba(0,220,255,.9)';ctx.lineWidth=1.5;
+          ctx.beginPath();
+          ctx.moveTo(bx,     by);
+          ctx.lineTo(bx+fw,  by+fh);
+          ctx.lineTo(bx,     by+b.size*ISO_H);
+          ctx.lineTo(bx-fw,  by+fh);
+          ctx.closePath(); ctx.stroke();
+        }
+      } else {
+        const u=item.obj;
+        const flash=u.flashTimer>0?u.flashTimer/0.12:0;
+        const alpha=u.dead?(u.deathTimer/0.4):1;
+        // selection ellipse on ground
+        if(u.selected){
+          const {x:sx,y:sy}=worldToIso(u.pos.x,u.pos.y);
+          ctx.strokeStyle='rgba(0,220,255,.85)';ctx.lineWidth=1.5;
+          ctx.beginPath();ctx.ellipse(sx,sy+ISO_H*.52,ts*.36,ts*.16,0,0,Math.PI*2);ctx.stroke();
+        }
+        drawIsoUnitAt(ctx,u.type,u.team,u.angle,u.pos.x,u.pos.y,ts,flash*.7,alpha);
+        // HP bar
+        if(!u.dead){
+          const {x:sx,y:sy}=worldToIso(u.pos.x,u.pos.y);
+          this._drawIsoBar(sx, sy+ISO_H*.5-ts*.72, ts*.78, u.hp, u.maxHp);
+        }
+      }
     });
   }
 
-  renderUnits(){
-    const {ctx,ts} = this;
-    const sorted = [...this.units].sort((a,b)=>a.pos.y-b.pos.y);
-    sorted.forEach(u=>{
-      if(u.dead && u.deathTimer<=0) return;
-      ctx.save();
-      ctx.translate(u.pos.x, u.pos.y);
-      const flash = u.flashTimer>0 ? u.flashTimer/0.12 : 0;
-      if(u.dead) ctx.globalAlpha=u.deathTimer/0.4;
-      drawUnitAt(ctx, u.type, u.team, u.angle, ts, flash*.7);
-      ctx.restore();
-    });
+  _drawIsoBar(x,y,w,hp,maxHp){
+    const {ctx}=this;
+    const bh=4, bx=x-w*.5;
+    ctx.fillStyle='#111'; ctx.fillRect(bx,y,w,bh);
+    const pct=hp/maxHp;
+    ctx.fillStyle=pct>.5?'#44ff88':pct>.25?'#ffaa00':'#ff4422';
+    ctx.fillRect(bx,y,w*pct,bh);
+    ctx.strokeStyle='rgba(0,0,0,.5)';ctx.lineWidth=.5;ctx.strokeRect(bx,y,w,bh);
   }
 
   renderProjectiles(){
@@ -728,44 +786,22 @@ class Game {
   }
 
   renderParticles(){
-    const {ctx} = this;
+    const {ctx}=this;
     this.particles.forEach(p=>{
+      const {x:sx,y:sy}=worldToIso(p.x,p.y);
       const a=p.life/p.maxLife;
       ctx.globalAlpha=a*.9;
       ctx.fillStyle=p.col;
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      ctx.beginPath();ctx.arc(sx,sy+ISO_H*.5,p.r,0,Math.PI*2);ctx.fill();
     });
     ctx.globalAlpha=1;
   }
 
-  renderHealthBars(){
-    const {ctx,ts} = this;
-    const drawBar=(x,y,w,hp,maxHp,offset=0)=>{
-      const bw=w, bh=4;
-      const bx=x-bw*.5, by=y-ts*.55-bh-offset;
-      ctx.fillStyle='#111';
-      ctx.fillRect(bx,by,bw,bh);
-      const pct=hp/maxHp;
-      ctx.fillStyle=pct>.5?'#44ff88':pct>.25?'#ffaa00':'#ff4422';
-      ctx.fillRect(bx,by,bw*pct,bh);
-      ctx.strokeStyle='rgba(0,0,0,.5)';ctx.lineWidth=.5;
-      ctx.strokeRect(bx,by,bw,bh);
-    };
-    this.units.forEach(u=>{
-      if(u.dead) return;
-      drawBar(u.pos.x,u.pos.y,ts*.8,u.hp,u.maxHp);
-    });
-    this.buildings.forEach(b=>{
-      if(b.dead) return;
-      drawBar(b.cx,b.cy,b.size*ts*.85,b.hp,b.maxHp,b.size*ts*.5-ts*.55);
-    });
-  }
-
   renderDragBox(){
     if(!this.dragBox) return;
-    const {ctx,cam} = this;
+    const {ctx}=this;
     const {sx,sy,ex,ey}=this.dragBox;
-    const x=Math.min(sx,ex)+cam.x, y=Math.min(sy,ey)+cam.y;
+    const x=Math.min(sx,ex), y=Math.min(sy,ey);
     const w=Math.abs(ex-sx), h=Math.abs(ey-sy);
     ctx.strokeStyle='rgba(0,200,255,.8)'; ctx.lineWidth=1;
     ctx.fillStyle='rgba(0,200,255,.08)';
@@ -875,47 +911,46 @@ class Game {
   renderRallyPoint(){
     const bld=this.selectedBuilding;
     if(!bld||bld.dead||!bld.rallyPoint) return;
-    const {ctx} = this;
+    const {ctx}=this;
     const rp=bld.rallyPoint;
-    // dashed line from building centre to rally
+    const {x:bx,y:by}=worldToIso(bld.cx,bld.cy);
+    const {x:rx,y:ry}=worldToIso(rp.x,rp.y);
+    const ry2=ry+ISO_H*.5;
     ctx.setLineDash([5,5]);
-    ctx.strokeStyle='rgba(0,255,170,.35)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(bld.cx,bld.cy); ctx.lineTo(rp.x,rp.y); ctx.stroke();
+    ctx.strokeStyle='rgba(0,255,170,.35)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(bx,by+ISO_H*.5);ctx.lineTo(rx,ry2);ctx.stroke();
     ctx.setLineDash([]);
-    // crosshair marker
-    ctx.strokeStyle='#00ffaa'; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.moveTo(rp.x-9,rp.y); ctx.lineTo(rp.x+9,rp.y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(rp.x,rp.y-9); ctx.lineTo(rp.x,rp.y+9); ctx.stroke();
-    ctx.beginPath(); ctx.arc(rp.x,rp.y,5,0,Math.PI*2); ctx.stroke();
+    ctx.strokeStyle='#00ffaa';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(rx-9,ry2);ctx.lineTo(rx+9,ry2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(rx,ry2-9);ctx.lineTo(rx,ry2+9);ctx.stroke();
+    ctx.beginPath();ctx.arc(rx,ry2,5,0,Math.PI*2);ctx.stroke();
   }
 
   renderMinimap(){
+    // Minimap stays top-down orthographic for clarity
     const {mmCtx,map,ts,mmScale:ms} = this;
     const mw=map.width, mh=map.height;
-    // terrain
+    const TC=['#030608','#2b571a','#7a4e2b','#c8a96e','#0e2a5a','#4a4a4a','#0c1724','#7a1500','#cce0f0','#19301a'];
     for(let ty=0;ty<mh;ty+=2) for(let tx=0;tx<mw;tx+=2){
-      const id=map.terrain[ty*mw+tx];
-      const col=['#030608','#2b571a','#7a4e2b','#c8a96e','#0e2a5a','#4a4a4a','#0c1724','#7a1500','#cce0f0','#19301a'][id]||'#222';
-      mmCtx.fillStyle=col; mmCtx.fillRect(tx*ms,ty*ms,ms*2,ms*2);
+      mmCtx.fillStyle=TC[map.terrain[ty*mw+tx]]||'#222';
+      mmCtx.fillRect(tx*ms,ty*ms,ms*2,ms*2);
     }
-    // buildings
     this.buildings.forEach(b=>{
       if(b.dead) return;
       mmCtx.fillStyle=TEAM_COL[b.team].pri;
       mmCtx.fillRect(b.tx*ms,b.ty*ms,b.size*ms,b.size*ms);
     });
-    // units
     this.units.forEach(u=>{
       if(u.dead) return;
       mmCtx.fillStyle=TEAM_COL[u.team].pri;
-      const ux=u.pos.x/ts*ms, uy=u.pos.y/ts*ms;
-      mmCtx.fillRect(ux-1,uy-1,3,3);
+      mmCtx.fillRect(u.pos.x/ts*ms-1,u.pos.y/ts*ms-1,3,3);
     });
-    // viewport
-    const vx=this.cam.x/ts*ms, vy=this.cam.y/ts*ms;
-    const vw=this.cv.width/ts*ms, vh=this.cv.height/ts*ms;
-    mmCtx.strokeStyle='rgba(200,220,255,.5)'; mmCtx.lineWidth=1;
-    mmCtx.strokeRect(vx,vy,vw,vh);
+    // viewport approximation (centre of iso view → tile coords)
+    const camCx=this.cam.x+this.cv.width*.5, camCy=this.cam.y+this.cv.height*.5;
+    const wc=isoToWorld(camCx,camCy);
+    const vcx=wc.x/ts*ms, vcy=wc.y/ts*ms;
+    mmCtx.strokeStyle='rgba(200,220,255,.6)'; mmCtx.lineWidth=1;
+    mmCtx.strokeRect(vcx-8,vcy-8,16,16);
   }
 }
 

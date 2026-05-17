@@ -22,6 +22,8 @@ class Editor {
     this.resize();
     this.buildPalettes();
     this.bindEvents();
+    // centre camera on the map's iso midpoint
+    this._centerCamera();
     this.render();
 
     window.addEventListener('resize', ()=>this.resize());
@@ -48,6 +50,15 @@ class Editor {
     this.canvas.width  = rect.width;
     this.canvas.height = rect.height;
     this.render();
+  }
+
+  _centerCamera(){
+    const {width:mw,height:mh}=this.map;
+    const midTx=mw/2, midTy=mh/2;
+    const iso=tileToIso(midTx,midTy);
+    this.cam.x=iso.x-this.canvas.width*.5;
+    this.cam.y=iso.y-this.canvas.height*.5;
+    this.clampCam();
   }
 
   // ── palette building ──────────────────────────────────────────────
@@ -154,12 +165,16 @@ class Editor {
     document.getElementById('btn-undo')?.addEventListener('click',  ()=>this.undo());
   }
 
-  screenToWorld(sx, sy){
-    return { x: sx + this.cam.x, y: sy + this.cam.y };
+  // iso camera clamp
+  clampCam(){
+    const {width:mw,height:mh}=this.map;
+    const cw=this.canvas.width, ch=this.canvas.height;
+    this.cam.x=Math.max(-(mh)*(ISO_W/2)-ISO_W, Math.min(this.cam.x, (mw)*(ISO_W/2)+ISO_W-cw));
+    this.cam.y=Math.max(0, Math.min(this.cam.y, (mw+mh)*(ISO_H/2)+ISO_H*3-ch));
   }
 
-  worldToTile(wx, wy){
-    return { tx: Math.floor(wx/this.ts), ty: Math.floor(wy/this.ts) };
+  screenToTileIso(sx, sy){
+    return screenToTile(sx, sy, this.cam.x, this.cam.y);
   }
 
   inBounds(tx, ty){
@@ -167,7 +182,7 @@ class Editor {
   }
 
   onDown(e){
-    if(e.button===1){ this._panStart={x:e.clientX+this.cam.x,y:e.clientY+this.cam.y}; return; }
+    if(e.button===1){ this._panStart={x:e.clientX+this.cam.x, y:e.clientY+this.cam.y}; return; }
     this.updateMouse(e);
     if(e.button===0){
       this.pushHistory();
@@ -196,7 +211,6 @@ class Editor {
   onRight(e){
     this.updateMouse(e);
     const {tx,ty} = this.mouse;
-    // remove object at tile
     const idx = this.map.objects.findIndex(o=>{
       const sz = BUILDING_STATS[o.type]?.size || 1;
       return tx>=o.tx && tx<o.tx+sz && ty>=o.ty && ty<o.ty+sz;
@@ -210,21 +224,14 @@ class Editor {
     this.clampCam(); this.render();
   }
 
-  clampCam(){
-    const maxX = this.map.width*this.ts - this.canvas.width;
-    const maxY = this.map.height*this.ts - this.canvas.height;
-    this.cam.x = Math.max(0, Math.min(this.cam.x, Math.max(0,maxX)));
-    this.cam.y = Math.max(0, Math.min(this.cam.y, Math.max(0,maxY)));
-  }
-
   updateMouse(e){
     const rect = this.canvas.getBoundingClientRect();
-    const wx = e.clientX - rect.left + this.cam.x;
-    const wy = e.clientY - rect.top  + this.cam.y;
-    const tx = Math.floor(wx/this.ts);
-    const ty = Math.floor(wy/this.ts);
-    this.mouse = {wx,wy,tx,ty};
-    if(this.statusTile) this.statusTile.textContent = `(${tx},${ty}) ${TILES[this.map.terrain[ty*this.map.width+tx]]?.name||'?'}`;
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const {tx, ty} = screenToTile(sx, sy, this.cam.x, this.cam.y);
+    this.mouse = {sx, sy, tx, ty};
+    const id = this.inBounds(tx,ty) ? this.map.terrain[ty*this.map.width+tx] : -1;
+    if(this.statusTile) this.statusTile.textContent = `(${tx},${ty}) ${TILES[id]?.name||'out of bounds'}`;
   }
 
   // ── tools ─────────────────────────────────────────────────────────
@@ -335,54 +342,63 @@ class Editor {
     window.open('game.html','_blank');
   }
 
-  // ── rendering ─────────────────────────────────────────────────────
+  // ── rendering (isometric) ─────────────────────────────────────────
   render(){
-    const {ctx, canvas, map, ts, cam} = this;
+    const {ctx, canvas, map, cam} = this;
     const cw=canvas.width, ch=canvas.height;
     ctx.fillStyle='#020810'; ctx.fillRect(0,0,cw,ch);
 
     ctx.save();
     ctx.translate(-cam.x, -cam.y);
 
-    // visible tile range
-    const x0=Math.max(0,Math.floor(cam.x/ts));
-    const y0=Math.max(0,Math.floor(cam.y/ts));
-    const x1=Math.min(map.width, Math.ceil((cam.x+cw)/ts));
-    const y1=Math.min(map.height,Math.ceil((cam.y+ch)/ts));
+    // visible tile range via iso viewport
+    const hw=ISO_W/2, hh=ISO_H/2;
+    const corners=[
+      {ix:cam.x,    iy:cam.y},{ix:cam.x+cw, iy:cam.y},
+      {ix:cam.x,    iy:cam.y+ch},{ix:cam.x+cw,iy:cam.y+ch},
+    ];
+    const ftxs=corners.map(c=>(c.ix/hw+c.iy/hh)/2);
+    const ftys=corners.map(c=>(c.iy/hh-c.ix/hw)/2);
+    const minTx=Math.max(0,            Math.floor(Math.min(...ftxs))-1);
+    const maxTx=Math.min(map.width-1,  Math.ceil( Math.max(...ftxs))+1);
+    const minTy=Math.max(0,            Math.floor(Math.min(...ftys))-1);
+    const maxTy=Math.min(map.height-1, Math.ceil( Math.max(...ftys))+1);
 
-    for(let ty=y0;ty<y1;ty++) for(let tx=x0;tx<x1;tx++){
-      drawTile(ctx, map.terrain[ty*map.width+tx], tx*ts, ty*ts, ts);
+    // tiles in diagonal order
+    for(let sum=minTx+minTy; sum<=maxTx+maxTy; sum++){
+      for(let tx=Math.max(minTx,sum-maxTy); tx<=Math.min(maxTx,sum-minTy); tx++){
+        const ty=sum-tx;
+        if(ty<minTy||ty>maxTy) continue;
+        drawIsoTile(ctx, map.terrain[ty*map.width+tx], tx, ty);
+      }
     }
 
-    // grid overlay
-    ctx.strokeStyle='rgba(0,100,150,.2)'; ctx.lineWidth=.5;
-    for(let tx=x0;tx<=x1;tx++){ ctx.beginPath(); ctx.moveTo(tx*ts,y0*ts); ctx.lineTo(tx*ts,y1*ts); ctx.stroke(); }
-    for(let ty=y0;ty<=y1;ty++){ ctx.beginPath(); ctx.moveTo(x0*ts,ty*ts); ctx.lineTo(x1*ts,ty*ts); ctx.stroke(); }
-
-    // objects
-    map.objects.forEach(obj=>{
-      const px=obj.tx*ts, py=obj.ty*ts;
-      const sz=BUILDING_STATS[obj.type]?.size||1;
+    // objects sorted by depth
+    const sorted=[...map.objects].sort((a,b)=>(a.tx+a.ty)-(b.tx+b.ty));
+    sorted.forEach(obj=>{
       if(BUILDING_STATS[obj.type]){
-        drawBuilding(ctx, obj.type, obj.team, px, py, ts);
+        drawIsoBuilding(ctx, obj.type, obj.team, obj.tx, obj.ty);
       } else {
-        drawProp(ctx, obj.type, px, py, ts);
+        const wx=(obj.tx+.5)*TILE_SIZE, wy=(obj.ty+.5)*TILE_SIZE;
+        drawIsoProp(ctx, obj.type, wx, wy);
       }
     });
 
-    // hover preview
+    // hover diamond
     const {tx, ty} = this.mouse;
     if(this.inBounds(tx,ty)){
-      if(this.tool==='place' && this.selObj){
-        const sz = BUILDING_STATS[this.selObj.type]?.size||1;
-        ctx.strokeStyle='rgba(0,220,255,.7)'; ctx.lineWidth=1.5;
-        ctx.strokeRect(tx*ts,ty*ts,sz*ts,sz*ts);
-        ctx.fillStyle='rgba(0,220,255,.1)';
-        ctx.fillRect(tx*ts,ty*ts,sz*ts,sz*ts);
-      } else {
-        ctx.strokeStyle='rgba(0,220,255,.5)'; ctx.lineWidth=1;
-        ctx.strokeRect(tx*ts,ty*ts,ts,ts);
-      }
+      const sz=this.tool==='place'&&this.selObj?(BUILDING_STATS[this.selObj.type]?.size||1):1;
+      const {x:hx,y:hy}=tileToIso(tx,ty);
+      const fw=sz*(ISO_W/2), fh=sz*(ISO_H/2);
+      ctx.strokeStyle='rgba(0,220,255,.8)'; ctx.lineWidth=1.5;
+      ctx.fillStyle='rgba(0,220,255,.1)';
+      ctx.beginPath();
+      ctx.moveTo(hx,    hy);
+      ctx.lineTo(hx+fw, hy+fh);
+      ctx.lineTo(hx,    hy+sz*ISO_H);
+      ctx.lineTo(hx-fw, hy+fh);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
     }
 
     ctx.restore();
