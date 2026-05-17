@@ -210,6 +210,42 @@ function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAl
   }
 }
 
+// ─── Factory building sprite ──────────────────────────────────────────
+// img/Factory.png: 1025×1025 single isometric view.
+// N vertex of the 2×2 footprint diamond is at (50%, 29%) in the frame.
+// Scale so the footprint diamond width matches 2×ISO_W = 128px in-game
+// → draw size ≈ 200px.
+const _FACTORY_DW = 200, _FACTORY_DH = 200;
+const _FACTORY_ANCHOR_X = 0.50; // fraction of DW where N vertex sits (horiz)
+const _FACTORY_ANCHOR_Y = 0.29; // fraction of DH where N vertex sits (vert)
+
+let _factorySS = null, _factoryReady = false;
+const _factoryCache = {};
+
+(function(){
+  const img = new Image();
+  img.onload  = ()=>{ _factoryReady = true; };
+  img.onerror = ()=>{ console.warn('img/Factory.png not found – using procedural fallback'); };
+  img.src = 'img/Factory.png';
+  _factorySS = img;
+})();
+
+function _getFactoryCached(team){
+  const key = 'f_' + team;
+  if(_factoryCache[key]) return _factoryCache[key];
+  const tmp = document.createElement('canvas');
+  tmp.width = _FACTORY_DW; tmp.height = _FACTORY_DH;
+  const tc = tmp.getContext('2d');
+  tc.drawImage(_factorySS, 0, 0, _FACTORY_DW, _FACTORY_DH);
+  if(team === 1){
+    tc.globalCompositeOperation = 'source-atop';
+    tc.globalAlpha = 0.35;
+    tc.fillStyle = '#ff2200';
+    tc.fillRect(0, 0, _FACTORY_DW, _FACTORY_DH);
+  }
+  return (_factoryCache[key] = tmp);
+}
+
 // ─── ISO BUILDINGS ─────────────────────────────────────────────────────
 // Draws a 3-faced isometric box: top face + SW wall + SE wall.
 // tx/ty = top-left tile of the building footprint.
@@ -219,6 +255,17 @@ function drawIsoBuilding(ctx, type, team, tx, ty){
 
   // N corner of footprint in iso space
   const {x:nx, y:ny} = tileToIso(tx, ty);
+
+  // ── Factory sprite (replaces procedural box entirely) ──────────────
+  if(type === 'Factory' && _factoryReady){
+    const cached = _getFactoryCached(team);
+    ctx.drawImage(cached,
+      nx - _FACTORY_DW * _FACTORY_ANCHOR_X,
+      ny - _FACTORY_DH * _FACTORY_ANCHOR_Y,
+      _FACTORY_DW, _FACTORY_DH);
+    return;
+  }
+
   const fw = size*(ISO_W/2); // half-width of diamond footprint
   const fh = size*(ISO_H/2); // half-height of diamond footprint
   const bldH = size * ISO_H * 1.1; // building height above ground
