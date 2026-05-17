@@ -61,13 +61,16 @@ const _heavyCache = {};
   _heavySS = img;
 })();
 
-// JS angle (0=E, π/4=SE … ±π=W) → sprite frame index
+// JS angle (0=E, π/4=SE … ±π=W) → sprite frame index.
+// In iso space, moving "east on screen" = world angle −π/4 (NE in world).
+// Corrected mapping shifts +1 so that world angle −π/4 → frame 4 (E sprite).
 // Sprite frames: 0=W 1=NW 2=N 3=NE 4=E 5=SE 6=S 7=SW
+// dir→frame:     E   SE   S   SW   W   NW   N   NE
+//                0    1   2    3   4    5   6    7
 function _heavyFrameIdx(angle){
   const a = ((angle % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
-  // dir: 0=E 1=SE 2=S 3=SW 4=W 5=NW 6=N 7=NE (clockwise from E)
   const dir = Math.round(a / (Math.PI/4)) % 8;
-  return [4, 5, 6, 7, 0, 1, 2, 3][dir];
+  return [5, 6, 7, 0, 1, 2, 3, 4][dir];
 }
 
 // Cached offscreen canvas per (frame, team) — built once when first needed.
@@ -158,14 +161,12 @@ function drawArtillery(ctx,s,c){
   ctx.fillStyle=c.pri; ctx.beginPath();ctx.arc(s*.1,0,s*.07,0,Math.PI*2);ctx.fill();
 }
 
-// ─── ISO unit rendering (shadow + squished sprite) ────────────────────
-// Call from game render loop with ctx already in world-iso space.
+// ─── ISO unit rendering ───────────────────────────────────────────────
 function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAlpha, alpha){
   const {x:sx,y:sy} = worldToIso(worldX, worldY);
-  const LIFT = 11;
   const midY = sy + ISO_H * 0.5;
 
-  // Ground shadow ellipse
+  // Ground shadow
   ctx.save();
   ctx.translate(sx, midY);
   ctx.scale(1, 0.42);
@@ -174,19 +175,17 @@ function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAl
   ctx.beginPath(); ctx.ellipse(0,0,tileSize*0.36,tileSize*0.36,0,0,Math.PI*2); ctx.fill();
   ctx.restore();
 
-  // Iso-squished unit
-  ctx.save();
-  ctx.translate(sx, midY - LIFT);
-  ctx.scale(1, 0.62);
-
   if(type === 'Heavy' && _heavyReady){
-    // ── Sprite-sheet path ──────────────────────────────────────────
-    const frame   = _heavyFrameIdx(angle);
-    const cached  = _heavyCachedFrame(frame, team);
-    const dx = -_HEAVY_DW / 2, dy = -_HEAVY_DH / 2;
+    // ── Sprite-sheet path ─────────────────────────────────────────
+    // Sprite is pre-rendered in perspective — do NOT apply iso squish.
+    // Anchor so ~85% of frame height sits above the ground centre (midY).
+    const frame  = _heavyFrameIdx(angle);
+    const cached = _heavyCachedFrame(frame, team);
+    const dx = sx - _HEAVY_DW / 2;
+    const dy = midY - _HEAVY_DH * 0.85;
+    ctx.save();
     if(alpha != null) ctx.globalAlpha = alpha;
     ctx.drawImage(cached, dx, dy);
-    // Hit flash: white overlay clipped to sprite shape via source-atop on a temp canvas
     if(flashAlpha > 0){
       const ftmp = document.createElement('canvas');
       ftmp.width = _HEAVY_DW; ftmp.height = _HEAVY_DH;
@@ -198,13 +197,17 @@ function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAl
       fc.fillRect(0, 0, _HEAVY_DW, _HEAVY_DH);
       ctx.drawImage(ftmp, dx, dy);
     }
+    ctx.restore();
   } else {
-    // ── Procedural path (all other types, or Heavy before sheet loads) ──
+    // ── Procedural path ───────────────────────────────────────────
+    // Top-down art projected onto iso plane via y-squish.
+    ctx.save();
+    ctx.translate(sx, midY - 11);
+    ctx.scale(1, 0.62);
     if(alpha != null) ctx.globalAlpha = alpha;
     drawUnitAt(ctx, type, team, angle, tileSize, flashAlpha);
+    ctx.restore();
   }
-
-  ctx.restore();
 }
 
 // ─── ISO BUILDINGS ─────────────────────────────────────────────────────
