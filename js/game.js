@@ -64,6 +64,9 @@ class Building {
     // center pixel
     this.cx = this.px + this.size*TS*.5;
     this.cy = this.py + this.size*TS*.5;
+    // production
+    this.queue      = [];   // [{type, elapsed, total}]
+    this.rallyPoint = null; // V2 world pos
   }
 }
 
@@ -92,6 +95,13 @@ class Particle {
 // ─── projectile kind per unit type ────────────────────────────────────
 const UNIT_PROJ = {Scout:'bullet',Tank:'shell',Heavy:'beam',Artillery:'missile'};
 
+// ─── production ───────────────────────────────────────────────────────
+const PROD_TIME = { Scout:8, Tank:15, Heavy:25, Artillery:20 };
+const CAN_PRODUCE = {
+  CommandCenter: ['Scout','Tank'],
+  Factory:       ['Scout','Tank','Heavy','Artillery'],
+};
+
 // ─── Game ──────────────────────────────────────────────────────────────
 class Game {
   constructor(canvas, mapData){
@@ -110,7 +120,9 @@ class Game {
     this.projectiles= [];
     this.particles  = [];
 
-    this.selected   = [];   // selected units
+    this.selected         = [];   // selected units
+    this.selectedBuilding = null; // player building currently focused
+    this._lastBldPanel    = null; // tracks when to rebuild prod buttons DOM
     this.dragBox    = null; // {sx,sy,ex,ey}
     this.keys       = {};
     this.mouse      = {x:0,y:0};
@@ -225,11 +237,24 @@ class Game {
       if(this.over) return;
       const hit = this.unitAt(w.x,w.y);
       if(hit && hit.team===0){
+        // select unit, deselect building
+        this.selectedBuilding=null; this._lastBldPanel=null;
         if(!e.shiftKey) this.selected.forEach(u=>u.selected=false), this.selected=[];
         if(!hit.selected){ hit.selected=true; this.selected.push(hit); }
       } else {
-        if(!e.shiftKey) this.selected.forEach(u=>u.selected=false), this.selected=[];
-        this.dragBox = { sx:e.clientX, sy:e.clientY, ex:e.clientX, ey:e.clientY };
+        // check player building click
+        const hitBld = this.buildings.find(b=>{
+          if(b.dead||b.team!==0) return false;
+          return w.x>=b.px&&w.x<b.px+b.size*TS&&w.y>=b.py&&w.y<b.py+b.size*TS;
+        });
+        if(hitBld){
+          this.selectedBuilding=hitBld;
+          if(!e.shiftKey) this.selected.forEach(u=>u.selected=false), this.selected=[];
+        } else {
+          this.selectedBuilding=null; this._lastBldPanel=null;
+          if(!e.shiftKey) this.selected.forEach(u=>u.selected=false), this.selected=[];
+          this.dragBox = { sx:e.clientX, sy:e.clientY, ex:e.clientX, ey:e.clientY };
+        }
       }
     }
   }
@@ -267,6 +292,14 @@ class Game {
   onRight(e){
     if(this.over) return;
     const w = this.screenToWorld(e.clientX, e.clientY);
+
+    // building selected + no unit orders → set rally point
+    if(this.selectedBuilding && !this.selectedBuilding.dead && this.selected.length===0){
+      this.selectedBuilding.rallyPoint = new V2(w.x, w.y);
+      this.spawnClickParticles(w.x, w.y, '#00ffaa');
+      return;
+    }
+
     const enemy = this.unitAt(w.x,w.y);
     const enemyBuilding = this.buildings.find(b=>{
       if(b.dead||b.team===0) return false;
@@ -334,11 +367,13 @@ class Game {
     // escape to deselect
     if(this.keys['Escape']){
       this.selected.forEach(u=>u.selected=false); this.selected=[];
+      this.selectedBuilding=null; this._lastBldPanel=null;
       this.keys['Escape']=false;
     }
 
     this.updateUnits(dt);
     this.updateBuildings(dt);
+    this.updateProduction(dt);
     this.updateProjectiles(dt);
     this.updateParticles(dt);
     this.updateEnemyAI(dt);
@@ -460,6 +495,45 @@ class Game {
         b.cd=b.cdMax;
       }
     });
+  }
+
+  updateProduction(dt){
+    this.buildings.forEach(b=>{
+      if(b.dead||b.team!==0||!b.queue||b.queue.length===0) return;
+      const job=b.queue[0];
+      job.elapsed=Math.min(job.elapsed+dt, job.total);
+      if(job.elapsed>=job.total){
+        b.queue.shift();
+        this.spawnProducedUnit(b, job.type);
+      }
+    });
+  }
+
+  queueUnit(bld, type){
+    if(bld.dead||bld.team!==0) return;
+    if(!(CAN_PRODUCE[bld.type]||[]).includes(type)) return;
+    if(bld.queue.length>=5) return;
+    bld.queue.push({type, elapsed:0, total:PROD_TIME[type]});
+  }
+
+  spawnProducedUnit(bld, type){
+    const rally = bld.rallyPoint
+      ? new V2(bld.rallyPoint.x, bld.rallyPoint.y)
+      : new V2(bld.cx, bld.cy + bld.size*TS*.9);
+    const u = new Unit(type, bld.cx, bld.cy, bld.team);
+    u.targetPos = rally;
+    u.state = 'moving';
+    this.units.push(u);
+    this.showMessage(type.toUpperCase()+' DEPLOYED', 'var(--ok)');
+  }
+
+  showMessage(text, color='var(--accent)'){
+    const el=document.getElementById('msgs');
+    if(!el) return;
+    const m=document.createElement('div');
+    m.className='msg'; m.style.color=color; m.textContent=text;
+    el.appendChild(m);
+    setTimeout(()=>m.remove(), 2800);
   }
 
   updateProjectiles(dt){
@@ -587,6 +661,7 @@ class Game {
     this.renderProjectiles();
     this.renderParticles();
     this.renderHealthBars();
+    this.renderRallyPoint();
     this.renderDragBox();
 
     ctx.restore();
@@ -698,24 +773,120 @@ class Game {
   }
 
   renderHUD(){
-    // bottom bar: selected unit info
-    const u = this.selected[0];
-    if(u && !u.dead){
-      const pc = document.getElementById('portrait');
-      if(pc){
-        const pctx=pc.getContext('2d');
-        pctx.clearRect(0,0,pc.width,pc.height);
-        drawPortrait(pctx, u.type, u.team, pc.width, pc.height);
+    const bld = this.selectedBuilding && !this.selectedBuilding.dead ? this.selectedBuilding : null;
+    const u   = this.selected[0] && !this.selected[0].dead ? this.selected[0] : null;
+    const unitPanel = document.getElementById('unit-panel');
+    const bldPanel  = document.getElementById('bld-panel');
+
+    if(bld){
+      if(unitPanel) unitPanel.style.display='none';
+      if(bldPanel)  bldPanel.style.display='flex';
+      this.updateBuildingPanel(bld);
+    } else {
+      if(unitPanel) unitPanel.style.display='flex';
+      if(bldPanel)  bldPanel.style.display='none';
+      if(u){
+        const pc=document.getElementById('portrait');
+        if(pc){ const pctx=pc.getContext('2d'); pctx.clearRect(0,0,pc.width,pc.height); drawPortrait(pctx,u.type,u.team,pc.width,pc.height); }
+        const pct=u.hp/u.maxHp;
+        const fill=document.getElementById('unit-hp-fill');
+        if(fill){ fill.style.width=(pct*100)+'%'; fill.className='bar-fill hp-fill'+(pct<.25?' crit':pct<.5?' low':''); }
+        const nm=document.getElementById('uname');
+        if(nm) nm.textContent=u.type.toUpperCase()+' │ HP '+u.hp+'/'+u.maxHp;
+      } else {
+        const nm=document.getElementById('uname');
+        if(nm) nm.textContent='SELECT A UNIT';
       }
-      const pct=u.hp/u.maxHp;
-      const fill=document.querySelector('.hp-fill');
-      if(fill){
-        fill.style.width=(pct*100)+'%';
-        fill.className='bar-fill hp-fill'+(pct<.25?' crit':pct<.5?' low':'');
-      }
-      const name=document.querySelector('.uname');
-      if(name) name.textContent=u.type.toUpperCase()+' │ HP '+u.hp+'/'+u.maxHp;
     }
+  }
+
+  updateBuildingPanel(bld){
+    // portrait
+    const pc=document.getElementById('bld-portrait');
+    if(pc){
+      const pctx=pc.getContext('2d');
+      pctx.fillStyle='#0a1520'; pctx.fillRect(0,0,pc.width,pc.height);
+      drawBuilding(pctx, bld.type, bld.team, 0, 0, pc.width/(bld.size||1));
+    }
+    // name & HP
+    const nm=document.getElementById('bld-name');
+    if(nm) nm.textContent=bld.type.toUpperCase()+' │ HP '+Math.max(0,bld.hp)+'/'+bld.maxHp;
+    const fill=document.getElementById('bld-hp-fill');
+    if(fill){
+      const pct=bld.hp/bld.maxHp;
+      fill.style.width=(pct*100)+'%';
+      fill.className='bar-fill hp-fill'+(pct<.25?' crit':pct<.5?' low':'');
+    }
+    // production buttons – only rebuild DOM when building changes
+    if(this._lastBldPanel!==bld){
+      this._lastBldPanel=bld;
+      const btnsEl=document.getElementById('prod-btns');
+      if(btnsEl){
+        btnsEl.innerHTML='';
+        const canProd=CAN_PRODUCE[bld.type]||[];
+        if(canProd.length===0){
+          btnsEl.innerHTML='<span style="font-size:.65rem;opacity:.45">No production</span>';
+        }
+        canProd.forEach(type=>{
+          const btn=document.createElement('button');
+          btn.className='prod-btn';
+          const cv=document.createElement('canvas');
+          cv.width=cv.height=30;
+          const bctx=cv.getContext('2d');
+          bctx.fillStyle='#0a1520'; bctx.fillRect(0,0,30,30);
+          bctx.save(); bctx.translate(15,15);
+          drawUnitAt(bctx,type,bld.team,0,28);
+          bctx.restore();
+          const lbl=document.createElement('div'); lbl.textContent=type; lbl.style.cssText='font-size:8px;color:var(--text)';
+          const t=document.createElement('div'); t.textContent=PROD_TIME[type]+'s'; t.style.cssText='font-size:8px;color:var(--accent)';
+          btn.append(cv,lbl,t);
+          btn.onclick=()=>this.queueUnit(bld,type);
+          btnsEl.appendChild(btn);
+        });
+      }
+    }
+    // queue list – rebuild every frame (shows live timer)
+    const qEl=document.getElementById('prod-queue');
+    if(qEl){
+      qEl.innerHTML='';
+      if(bld.queue.length===0){
+        qEl.innerHTML='<span style="font-size:.65rem;opacity:.4">— idle —</span>';
+      } else {
+        bld.queue.forEach((job,i)=>{
+          const row=document.createElement('div');
+          row.className='queue-row';
+          const pct=i===0?job.elapsed/job.total:0;
+          const tLeft=i===0?(job.total-job.elapsed).toFixed(1)+'s':'–';
+          row.innerHTML=`
+            <span class="q-name">${job.type}</span>
+            ${i===0
+              ?`<div class="bar q-bar"><div class="bar-fill" style="width:${pct*100}%;background:var(--accent)"></div></div>
+                <span class="q-time">${tLeft}</span>`
+              :`<span class="q-time" style="opacity:.4">queued</span>`
+            }
+            <button class="cancel-btn" title="Cancel">×</button>`;
+          row.querySelector('.cancel-btn').onclick=()=>{ bld.queue.splice(i,1); this._lastBldPanel=null; };
+          qEl.appendChild(row);
+        });
+      }
+    }
+  }
+
+  renderRallyPoint(){
+    const bld=this.selectedBuilding;
+    if(!bld||bld.dead||!bld.rallyPoint) return;
+    const {ctx} = this;
+    const rp=bld.rallyPoint;
+    // dashed line from building centre to rally
+    ctx.setLineDash([5,5]);
+    ctx.strokeStyle='rgba(0,255,170,.35)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(bld.cx,bld.cy); ctx.lineTo(rp.x,rp.y); ctx.stroke();
+    ctx.setLineDash([]);
+    // crosshair marker
+    ctx.strokeStyle='#00ffaa'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(rp.x-9,rp.y); ctx.lineTo(rp.x+9,rp.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(rp.x,rp.y-9); ctx.lineTo(rp.x,rp.y+9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(rp.x,rp.y,5,0,Math.PI*2); ctx.stroke();
   }
 
   renderMinimap(){
