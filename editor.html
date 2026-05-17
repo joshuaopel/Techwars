@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TECHWARS – Map Editor</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="ed">
+  <!-- ── menu bar ─────────────────────────────────────── -->
+  <div id="ed-menu">
+    <span style="color:var(--accent);letter-spacing:.2em;font-size:.8rem;margin-right:.5rem">TECHWARS MAP EDITOR</span>
+    <button class="btn sm" id="btn-new">NEW</button>
+    <button class="btn sm" id="btn-export">EXPORT JSON</button>
+    <button class="btn sm" id="btn-load">LOAD JSON</button>
+    <button class="btn sm green" id="btn-play">▶ PLAY</button>
+    <span style="margin-left:auto;display:flex;gap:.4rem">
+      <button class="tbtn" data-tool="paint">PAINT</button>
+      <button class="tbtn" data-tool="erase">ERASE</button>
+      <button class="tbtn" data-tool="fill">FILL</button>
+      <button class="tbtn" data-tool="place" id="btn-place-mode">PLACE OBJ</button>
+      <span style="width:1px;background:var(--border);margin:6px 4px"></span>
+      <button class="btn sm" id="btn-undo">UNDO</button>
+    </span>
+  </div>
+
+  <!-- ── left: tile palette ──────────────────────────── -->
+  <div id="ed-left">
+    <div class="pal-sec">
+      <h3>◈ TERRAIN</h3>
+      <div class="pal-grid" id="tile-palette"></div>
+    </div>
+  </div>
+
+  <!-- ── centre: canvas ──────────────────────────────── -->
+  <div id="ed-wrap">
+    <canvas id="ed-canvas"></canvas>
+  </div>
+
+  <!-- ── right: object palette ──────────────────────── -->
+  <div id="ed-right">
+    <div class="pal-sec">
+      <h3>◈ BUILDINGS</h3>
+      <p style="font-size:.62rem;color:var(--text);opacity:.6;line-height:1.6;margin-bottom:4px">
+        [P] = Player team<br>[E] = Enemy team<br>Right-click to delete
+      </p>
+      <div class="pal-grid" id="obj-palette"></div>
+    </div>
+    <div class="pal-sec" style="margin-top:8px">
+      <h3>◈ TIPS</h3>
+      <p style="font-size:.62rem;color:var(--text);opacity:.55;line-height:1.8">
+        Paint: left drag<br>
+        Fill: click bucket<br>
+        Place: click map<br>
+        Delete: right-click obj<br>
+        Scroll: pan map<br>
+        Middle drag: pan<br>
+        Ctrl+Z: undo
+      </p>
+    </div>
+  </div>
+
+  <!-- ── status bar ───────────────────────────────────── -->
+  <div id="ed-status">
+    <span>TOOL: <span id="st-tool" style="color:var(--accent)">PAINT</span></span>
+    <span>TILE: <span id="st-tile" style="color:var(--accent)">(0,0)</span></span>
+    <span style="margin-left:auto;opacity:.5;font-size:.65rem">TECHWARS v1.0 | joshuaopel/techwars</span>
+  </div>
+</div>
+
+<script src="js/tiles.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/editor.js"></script>
+<script>
+// keyboard shortcuts
+window.addEventListener('keydown',e=>{
+  if(!window.editor) return;
+  if(e.ctrlKey&&e.code==='KeyZ'){ e.preventDefault(); editor.undo(); }
+  if(e.code==='KeyP') editor.setTool('paint');
+  if(e.code==='KeyE') editor.setTool('erase');
+  if(e.code==='KeyF') editor.setTool('fill');
+  if(e.code==='Delete'||e.code==='Backspace'){
+    const {tx,ty}=editor.mouse;
+    const idx=editor.map.objects.findIndex(o=>{
+      const sz=BUILDING_STATS[o.type]?.size||1;
+      return tx>=o.tx&&tx<o.tx+sz&&ty>=o.ty&&ty<o.ty+sz;
+    });
+    if(idx!==-1){ editor.pushHistory(); editor.map.objects.splice(idx,1); editor.render(); }
+  }
+});
+</script>
+</body>
+</html>

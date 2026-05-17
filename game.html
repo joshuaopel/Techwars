@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TECHWARS – Play</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="gw">
+  <canvas id="gc"></canvas>
+
+  <!-- ── HUD ──────────────────────────────────────────── -->
+  <div id="hud">
+
+    <!-- minimap -->
+    <div id="minimap-wrap">
+      <canvas id="minimap"></canvas>
+    </div>
+
+    <!-- bottom info bar -->
+    <div id="bottom-bar">
+      <canvas id="portrait" width="58" height="58"></canvas>
+      <div id="unit-stats">
+        <div class="uname" id="uname">SELECT A UNIT</div>
+        <div class="bar-row">
+          <span style="font-size:.68rem;opacity:.7">HP</span>
+          <div class="bar"><div class="bar-fill hp-fill" style="width:100%"></div></div>
+        </div>
+      </div>
+      <div style="margin-left:auto;font-size:.68rem;opacity:.5;line-height:1.9;text-align:right">
+        <div>WASD / ↑↓←→  camera</div>
+        <div>LClick  select · Drag  box-select</div>
+        <div>RClick  move / attack · ESC  deselect</div>
+      </div>
+    </div>
+
+    <!-- objectives -->
+    <div id="hotkeys">
+      <div style="color:var(--accent);margin-bottom:4px;letter-spacing:.15em">OBJECTIVE</div>
+      <div>Destroy the enemy</div>
+      <div>Command Center</div>
+    </div>
+
+    <!-- floating messages -->
+    <div id="msgs"></div>
+
+  </div><!-- /hud -->
+
+  <!-- ── game-over overlay ──────────────────────────── -->
+  <div id="overlay">
+    <h2 id="overlay-title">VICTORY</h2>
+    <p id="overlay-msg" style="font-size:1rem;letter-spacing:.15em;opacity:.8"></p>
+    <div class="btn-row">
+      <button class="btn green" id="btn-restart">▶ PLAY AGAIN</button>
+      <a class="btn" href="editor.html">✎ EDITOR</a>
+      <a class="btn" href="index.html">⌂ MENU</a>
+    </div>
+  </div>
+
+</div><!-- /gw -->
+
+<script src="js/tiles.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>

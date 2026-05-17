@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TECHWARS – Sci-Fi RTS</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+.landing::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 60% 40% at 30% 60%,rgba(0,100,200,.12),transparent),
+             radial-gradient(ellipse 40% 60% at 70% 30%,rgba(0,200,100,.06),transparent);
+  pointer-events:none;
+}
+.grid-bg{
+  position:absolute;inset:0;overflow:hidden;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(0,100,150,.08) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,100,150,.08) 1px,transparent 1px);
+  background-size:48px 48px;
+}
+.tagline{
+  margin-top:-.5rem;margin-bottom:2.5rem;
+  color:rgba(0,170,255,.45);font-size:.75rem;letter-spacing:.4em;
+}
+.feature-list{
+  list-style:none;text-align:center;font-size:.75rem;color:var(--text);
+  opacity:.6;line-height:2.2;margin-top:2rem;letter-spacing:.1em;
+}
+</style>
+</head>
+<body>
+<div class="landing" style="position:relative">
+  <div class="grid-bg"></div>
+  <h1>TECHWARS</h1>
+  <p class="tagline">╸ SCI-FI REAL-TIME STRATEGY ╺</p>
+  <p class="sub">Build your base · Command your fleet · Destroy the enemy</p>
+  <div class="btn-row">
+    <a class="btn green" href="game.html">▶ PLAY</a>
+    <a class="btn" href="editor.html">✎ MAP EDITOR</a>
+  </div>
+  <ul class="feature-list">
+    <li>8-direction sci-fi vehicle units &nbsp;·&nbsp; Scouts · Tanks · Heavies · Artillery</li>
+    <li>Paint terrain · Place buildings &amp; props · Export maps</li>
+    <li>Projectile combat · Turret defences · Command Center siege</li>
+    <li>WASD camera · Box select · Right-click orders · Minimap</li>
+  </ul>
+</div>
+</body>
+</html>
