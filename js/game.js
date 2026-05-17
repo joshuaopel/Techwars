@@ -764,7 +764,7 @@ class Game {
           ctx.lineTo(bx-fw,  by+fh);
           ctx.closePath(); ctx.stroke();
         }
-      } else {
+      } else if(item.kind==='unit'){
         const u=item.obj;
         const flash=u.flashTimer>0?u.flashTimer/0.12:0;
         const alpha=u.dead?(u.deathTimer/0.4):1;
