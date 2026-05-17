@@ -215,7 +215,7 @@ function drawIsoUnitAt(ctx, type, team, angle, worldX, worldY, tileSize, flashAl
 // N vertex of the 2×2 footprint diamond is at (50%, 29%) in the frame.
 // Scale so the footprint diamond width matches 2×ISO_W = 128px in-game
 // → draw size ≈ 200px.
-const _FACTORY_DW = 200, _FACTORY_DH = 200;
+const _FACTORY_DW = 420, _FACTORY_DH = 420;
 const _FACTORY_ANCHOR_X = 0.50; // fraction of DW where N vertex sits (horiz)
 const _FACTORY_ANCHOR_Y = 0.29; // fraction of DH where N vertex sits (vert)
 
@@ -224,7 +224,7 @@ const _factoryCache = {};
 
 (function(){
   const img = new Image();
-  img.onload  = ()=>{ _factoryReady = true; };
+  img.onload  = ()=>{ _factoryReady = true; Object.keys(_factoryCache).forEach(k=>delete _factoryCache[k]); };
   img.onerror = ()=>{ console.warn('img/Factory.png not found – using procedural fallback'); };
   img.src = 'img/Factory.png';
   _factorySS = img;
